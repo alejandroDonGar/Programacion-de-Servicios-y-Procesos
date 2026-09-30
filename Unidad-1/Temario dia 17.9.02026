@@ -1,0 +1,368 @@
+***Programacion de servicios y procesos 1ªHORA:***
+
+*Libro a mirar* -> Pogramación de Servicios y Procesos en Python.
+
+Arquitectura Von Nuemann
+cpu------mem principal
+     |
+     |   |-> red
+    e/s--|-> teclado
+         |-> hdd
+
+- RI o Registro de instrucción: Listado de registros o movimientos almacenados.
+- PC o Program Counter: Dirección que apunta a la siguiente instrucción a ejecutar en la memoria. Cuando lo encuentra, le dice al registro de instrucción que ejecutar.
+- SP o Pila, almacena registro en reversa, LIFO "first in last out", hasta el numero 10000.
+
+- Solo se van ejecutanto 1 a 1, por lo que comenzo a ser lento. Se comenzó a seccionar en bloques y a llevarlos a una nueva memoria mas rapida, Caché, dentro del propio circuito de la cpu.
+-Posteriormente se paso de tener un solo nucleo, un solo centro para procesar las operaciones, a juntar mas dentro de una misma cpu, aumentanto la velocidad, las memorias caché etc.
+
+- Como hacemos que los dos programas "trabajen" a la vez:
+
+Programa 1:     Programa 2:
+1000-           2000- 
+mov a, var1     mov a, 27
+mov b, var2     mov b, a
+sum a,b         sum a,b 
+mov var3, a     mov var4, a
+
+var1 = 100
+var2 = 200
+
+- Se pueden meter los dos en memoria. Al contador de progrma le damos 1000 hace dos mov y sum y le decimos que pase a 2000 pero se rompe por coger datos de otro set, b del set de 1000.
+- Volvemos a empezar con pila en 1500. Pila -> 1499 - 100, Pila, -> 1498 - 200, Pila -> 1487 - 1002. Se hace una pausa y se anota como que estas operaciones forman parte del programa 1. 
+- Pila -> 2500 - 27. Pila -> 2499 - 27, Pila 2497 - 2002. Se vuelve a aparar y aanotar lo mismo pero para el programa 2. 
+- Mientras uno guarda en pila (programa 2), el programa 1 se ejecuta porque ya anteriormente tenia almacenado los datos en la pila, cogiendo de ahi, terminando los movimientos haciendo paracer que ambos estan trabajando a la vez. Ejecución concurrente. 
+
+- top -> procesos en directos
+- ps aux -> capurta de un instante donde se ven todos los procesos
+    | user
+    | PID
+    | VSZ
+    | RSS
+    | STAT
+    | START
+    | TIME
+- ps aux | grep usuario -> filtra por usuario. Podemos cambiar el usuario por otra columna, PID: 1234, TIME: 13:00 ...
+- ps -efl -> Añade mas columnas como el PPID (parent pid) o el estado del proceso. Tambien el PRI(Prioridad, la estandar es 80) y el NI(Sirve para sumar o restar prioridad) Cuanto mas bajo es el numero del PRI mas prioridad tiene.
+
+lscpu -> Comando para ver la cpu
+```
+Arquitectura:                            x86_64
+  modo(s) de operación de las CPUs:      32-bit, 64-bit
+  Tamaños de las direcciones:            48 bits physical, 48 bits virtual
+  Orden de los bytes:                    Little Endian
+CPU(s):                                  12
+  Lista de la(s) CPU(s) en línea:        0-11
+ID de fabricante:                        AuthenticAMD
+  Nombre del modelo:                     AMD Ryzen 5 PRO 4650G with Radeon Graph
+                                         ics
+    Familia de CPU:                      23
+    Modelo:                              96
+    Hilo(s) de procesamiento por núcleo: 2
+    Núcleo(s) por «socket»:              6
+    «Socket(s)»:                         1
+    Revisión:                            1
+    Aumento de frecuencia:               activada
+    CPU(s) factor de escala MHz:         69%
+    CPU MHz máx.:                        4309,3838
+    CPU MHz mín.:                        405,5900
+    BogoMIPS:                            7399,94
+    Indicadores:                         fpu vme de pse tsc msr pae mce cx8 apic
+                                          sep mtrr pge mca cmov pat pse36 clflus
+                                         h mmx fxsr sse sse2 ht syscall nx mmxex
+                                         t fxsr_opt pdpe1gb rdtscp lm constant_t
+                                         sc rep_good nopl xtopology nonstop_tsc 
+                                         cpuid extd_apicid aperfmperf rapl pni p
+                                         clmulqdq monitor ssse3 fma cx16 sse4_1 
+                                         sse4_2 x2apic movbe popcnt aes xsave av
+                                         x f16c rdrand lahf_lm cmp_legacy svm ex
+                                         tapic cr8_legacy abm sse4a misalignsse 
+                                         3dnowprefetch osvw ibs skinit wdt tce t
+                                         opoext perfctr_core perfctr_nb bpext pe
+                                         rfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_p
+                                         state ssbd mba ibrs ibpb stibp vmmcall 
+                                         fsgsbase bmi1 avx2 smep bmi2 cqm rdt_a 
+                                         rdseed adx smap clflushopt clwb sha_ni 
+                                         xsaveopt xsavec xgetbv1 cqm_llc cqm_occ
+                                         up_llc cqm_mbm_total cqm_mbm_local clze
+                                         ro irperf xsaveerptr rdpru wbnoinvd cpp
+                                         c arat npt lbrv svm_lock nrip_save tsc_
+                                         scale vmcb_clean flushbyasid decodeassi
+                                         sts pausefilter pfthreshold avic v_vmsa
+                                         ve_vmload vgif v_spec_ctrl umip rdpid o
+                                         verflow_recov succor smca
+Características de virtualización:       
+  Virtualización:                        AMD-V
+Cachés (suma de todas):                  
+  L1d:                                   192 KiB (6 instancias)
+  L1i:                                   192 KiB (6 instancias)
+  L2:                                    3 MiB (6 instancias)
+  L3:                                    8 MiB (2 instancias)
+NUMA:                                    
+  Modo(s) NUMA:                          1
+  CPU(s) del nodo NUMA 0:                0-11
+Vulnerabilidades:                        
+  Gather data sampling:                  Not affected
+  Ghostwrite:                            Not affected
+  Indirect target selection:             Not affected
+  Itlb multihit:                         Not affected
+  L1tf:                                  Not affected
+  Mds:                                   Not affected
+  Meltdown:                              Not affected
+  Mmio stale data:                       Not affected
+  Old microcode:                         Not affected
+  Reg file data sampling:                Not affected
+  Retbleed:                              Mitigation; untrained return thunk; SMT
+                                          enabled with STIBP protection
+  Spec rstack overflow:                  Mitigation; Safe RET
+  Spec store bypass:                     Mitigation; Speculative Store Bypass di
+                                         sabled via prctl
+  Spectre v1:                            Mitigation; usercopy/swapgs barriers an
+                                         d __user pointer sanitization
+  Spectre v2:                            Mitigation; Retpolines; IBPB conditiona
+                                         l; STIBP always-on; RSB filling; PBRSB-
+                                         eIBRS Not affected; BHI Not affected
+  Srbds:                                 Not affected
+  Tsa:                                   Not affected
+  Tsx async abort:                       Not affected
+  Vmscape:                               Mitigation; IBPB before exit to userspa
+                                         ce
+```
+En base 10      En base 2
+10¹             2¹
+10²             2²
+10³             2²
+10⁴             2³
+10⁴             2⁴
+10⁵             2⁵
+...             ...
+
+Trabajando con instrucciones de 8 bits, tenemos 256 instrucciones
+Direcciones usando 32 bits llegan a miles de millones de instrucciones
+
+Para trabajar en paralelo se necesitan minimo dos nucleos
+Para trabajar concurrentemente solo hace falta un nucleo
+
+como en el resultado de la terminal
+
+Tenemos 6 nucleos y 2 hilos por nucleo, en tonces podemos tener 6 procesos en parealelo, o 12 concurrentes. Incluso 12 concurrentes si los hilos no se molestaran unos a los otros.
+
+L1d:  (6 instancias)
+L1i:  (6 instancias)
+ L2:  (6 instancias)
+ L3:  (2 instancias)
+
+Estructura que pide instrucciones y datos por buses distintos a la vez en paralelo, ***ARQUITECTURA HARVARD***. Estan los dos en sitios distintos y se los trae a la vez. A eso se le llama L1d (direcciones) y L1i (instrucciones). Esta arquitecrua no es la general sino una dentro de la cpu, dentro de la targeta grafica integrada. dentro de la ***MEMORIA CACHE DE NIVEL 1***. Como tenemos 6 instancias, 1 por nucleo.
+
+La L2 es una memoria intermedia, de menor velocidad pero de mayor capacidad, esta tambien tiene 1 por nucleo (6).
+La L3 tiene 2 instancias, 1 por nucleo pero la informacion esta compartida entre todos.
+
+- ¿Que hace el fork?
+- 
+- "fork" devuelve un valor al proceso padre, el pid del proceso hijo, y devuelve 0 al hijo. Asi funciona la funcion, 0 al hijo y el PID al padre.
+
+```
+- import os
+- 
+- pid = os.fork() <- Llama al sistema y se clona
+- if pid == 0:
+-     print("Soy el hijo")
+- else:
+-     print("Soy el padre")
+- print("Los dos")
+```
+Respuesta en terminal 1:
+```
+- Soy el hijo
+- Los dos
+- Soy el padre
+- Los dos
+```
+Respuesta en terminal 2:
+```
+- Soy el padre
+- Soy el hijo
+- Los dos
+- Los dos
+```
+
+
+Van a aparecer las dos en pantalla, el hijo imprime su respuesta y el padre lo mismo, pero no es que uno ejecute los dos, son dos procesos diferentes.
+
+Busquemos el PID de ambos
+```
+- import os
+- 
+- pid = os.fork() <- Llama al sistema y se clona
+- if pid == 0:
+-     print(f"Soy el hijo y mi PID es {os.getPid()}")
+- else:
+-     print(f"Soy el padre y mi PID es {os.getPid()}")
+- print("Los dos")
+```
+
+Respuesta en terminal :
+```
+- Soy el hijo y mi PID es n.hijo
+- Los dos
+- Soy el padre y mi PID es n
+- Los dos
+```
+
+Añadamos el PID del hijo al del padre
+
+```
+- import os
+- 
+- pid = os.fork() <- Llama al sistema y se clona
+- if pid == 0:
+-     print(f"Soy el hijo y mi PID es {os.getPid()}")
+- else:
+-     print(f"Soy el padre y mi PID es {os.getPid()} y el de mi hijo es {pid}")
+- print("Los dos")
+```
+Respuesta en terminal :
+```
+- Soy el hijo y mi PID es n.hijo
+- Los dos
+- Soy el padre y mi PID es n.padre y el de mi hijo es n.hijo
+- Los dos
+```
+
+Añadamos el PID del padre al del hijo
+
+```
+- import os
+- 
+- pid = os.fork() <- Llama al sistema y se clona
+- if pid == 0:
+-     print(f"Soy el hijo y mi PID es {os.getPid()} y el de mi padre es {os.getppid}")
+- else:
+-     print(f"Soy el padre y mi PID es {os.getPid()} y el de mi hijo es {pid}")
+- print("Los dos")
+```
+Respuesta en terminal :
+```
+- Soy el hijo y mi PID es n.hijo y el de mi padre es n.padre
+- Los dos
+- Soy el padre y mi PID es n.padre y el de mi hijo es n.hijo
+- Los dos
+```
+Nuevo módulo, time con time.sleep(n)
+```
+import time
+
+print("Inicio del programa")
+# Pausa la ejecución durante 3 segundos
+time.sleep(3)
+print("Han pasado 3 segundos")
+
+```
+Se lo añadimos al código
+
+```
+- import os
+- 
+- pid = os.fork() <- Llama al sistema y se clona
+- if pid == 0:
+-     print(f"Soy el hijo y mi PID es {os.getPid()} y el de mi padre es {os.getppid}")
+- else:
+-     time.sleep(2)
+-     print(f"Soy el padre y mi PID es {os.getPid()} y el de mi hijo es {pid}")
+- print(f"Los dos {os.getpid()}")
+```
+
+Respuesta en terminal:
+
+```
+- Soy el hijo y mi PID es n.hijo y el de mi padre es n.padre
+- Los dos n.hijo
+- Soy el padre y mi PID es n.padre y el de mi hijo es n.hijo
+- Los dos n.padre
+```
+Al forzar un evento de entrada y salida, siempre vamos a obtener este orden porque bloqueamos el proceso y lo sacamos de la cpu.
+---------------------------------------------------------------------------
+
+***Desarrollo de interfaces 2ªHORA***
+
+Tipos de widgets basicos, row, column, icon, text, image, container
+
+Ejemplo Conceptual:
+
+Container(opcional si quieres dejar espacio entre objetos)
+    |
+    |
+    Column
+        | Text
+        | icon
+        | text
+        | text
+        | row
+            | ElevatedButton
+            | ElevatedButton
+
+Ejemplo con codigo:
+
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(
+    MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.school,
+                size: 60,
+              ),
+              Text('Harry Potter'),
+              Text('harry@email.com'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: () {},
+                    child: Text('EDITAR'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {},
+                    child: Text('SALIR'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+***Programacion multimedia y dispositivos móviles 3 y 4ªHORA:***
+
+Legion 5i Gen 10 (15" Intel)
+
+***Acceso a datos***
+
+Cuando es dependencia de testing, en el pom.xml dentro de la dependencia tenemos que poner el apartado: <scope>test</scope>
+Tambien está -> <scope>jar</scope>. Si NO se pone nada, se asume que es jar
+
+Como compilar
+mvn compile
+
+Siclo de vida
+validate -> compile -> test -> package -> verify -> install -> deploy
+
+Comandos mas importantes:
+mvn clean -> Limpia dentro del proyecto, borrando la carpeta target/ 
+mvn compile -> Se copian todos los arvhicos tipo class en target/ y se crea un jar/war
+mvn test
+mvn package
+
+Plugins: Con que version compilar, o donde desplegar, o a que servidor desplegar.
+
+Definir propiedades:
+Dentro de pom.xml -> <properties>propiedad</properties>
+
