@@ -322,15 +322,100 @@ Los dos 5123
 
 > ✏️ **Matiz:** `sleep` hace que ese orden sea **muy probable**, pero no lo **garantiza**. Si el sistema estuviera muy cargado, el hijo podría tardar más de 2 segundos.
 >
-> ➕ **Ampliación:** la forma correcta de que el padre **espere a que termine el hijo** es `os.wait()`:
->
-> ```python
-> else:
->     os.wait()  # El padre se bloquea hasta que el hijo termine
->     print("Soy el padre y mi hijo ya ha terminado")
-> ```
->
-> Si el padre no espera al hijo, el hijo queda como **zombie** (`Z` en `ps`) hasta que alguien recoge su estado de salida.
+> La forma correcta de que el padre **espere a que termine el hijo** es `os.wait()`, que se vio en la clase siguiente (**Ejemplo 5**).
+
+### Ejemplo 4: procesos intercalados (`programa2.py`)
+
+Padre e hijo hacen **10 iteraciones cada uno** a la vez, pero a distinto ritmo: el hijo duerme 1 segundo entre vuelta y vuelta y el padre, 2.
+
+```python
+import os, time
+
+pid = os.fork()
+
+if pid == 0:
+    # Hijo: una iteración por segundo
+    for i in range(10):              # i va de 0 a 9 → 10 vueltas
+        print(f"Hijo {os.getpid()}. Iteración {i}")
+        time.sleep(1)
+else:
+    # Padre: una iteración cada 2 segundos
+    for i in range(10):
+        print(f"Padre {os.getpid()}. Iteración {i}")
+        time.sleep(2)
+```
+
+Salida aproximada (los PID cambian):
+
+```
+Padre 5123. Iteración 0
+Hijo 5124. Iteración 0
+Hijo 5124. Iteración 1
+Padre 5123. Iteración 1
+Hijo 5124. Iteración 2
+Hijo 5124. Iteración 3
+Padre 5123. Iteración 2
+...
+Hijo 5124. Iteración 9         ← el hijo termina hacia el segundo 10
+Padre 5123. Iteración 5
+...                            ← el padre sigue solo hasta el segundo 20
+Padre 5123. Iteración 9
+```
+
+**Qué demuestra:**
+- Los dos procesos avanzan **a la vez** y sus mensajes salen **intercalados**. Es la **concurrencia** de la sección 2, ahora vista con tus propios procesos.
+- Cada `sleep` **bloquea** solo al proceso que lo llama y le deja la CPU al otro. Por eso el hijo, que duerme menos, imprime unas **dos líneas por cada una del padre**.
+- **Cada proceso tiene su propia copia de las variables:** la `i` del hijo y la del padre son distintas. Tras el `fork` no comparten memoria.
+- El hijo termina hacia el segundo 10 y el padre sigue solo hasta el 20. Como el padre **no hace `wait()`**, mientras sigue vivo el hijo ya terminado se queda como **zombie**. Compruébalo en otra terminal con `ps -efl | grep python` mientras se ejecuta: verás el hijo en estado `Z` y marcado como `<defunct>`.
+
+### Ejemplo 5: el padre espera al hijo con `os.wait()` (`programa3.py`)
+
+```python
+import os, time, sys
+
+pid = os.fork()
+
+if pid == 0:
+    # Hijo
+    print(f"PID: {os.getpid()}")
+    nombre = input("Ingrese su nombre: ")
+    time.sleep(5)
+    print(f"El proceso hijo va a terminar. Has escrito {nombre}")
+    sys.exit(5)                          # termina el hijo con código de salida 5
+else:
+    # Padre
+    pid, status = os.wait()              # se BLOQUEA hasta que termine un hijo
+    codigo = os.waitstatus_to_exitcode(status)
+    print(f"Soy el padre con PID: {os.getpid()}. El hijo ha terminado con PID: {pid} y estado: {codigo}")
+```
+
+```
+PID: 5124
+Ingrese su nombre: Alejandro
+El proceso hijo va a terminar. Has escrito Alejandro      ← 5 segundos después
+Soy el padre con PID: 5123. El hijo ha terminado con PID: 5124 y estado: 5
+```
+
+**Paso a paso:**
+
+| Instrucción | Qué hace |
+|---|---|
+| `os.wait()` | El padre se **bloquea** (estado `S`) hasta que **termina uno de sus hijos**. Por eso el mensaje del padre sale siempre **el último**: aquí el orden **sí está garantizado**, a diferencia del `sleep` del Ejemplo 3 |
+| `pid, status = os.wait()` | Devuelve **dos valores** (una tupla) que se reparten en dos variables: `pid` = el PID del hijo que ha terminado · `status` = su estado de salida, **codificado** |
+| `sys.exit(5)` | Termina el proceso **hijo** con **código de salida 5**. Es la forma que tiene el hijo de decirle al padre cómo le ha ido |
+| `os.waitstatus_to_exitcode(status)` | `status` no es directamente el 5: el sistema lo guarda codificado (para un `exit(5)` vale `5 × 256 = 1280`). Esta función lo **descodifica** y devuelve el código real: `5` |
+
+**Código de salida:** por convenio, **`0` = todo fue bien** y **cualquier otro número = algún error** (cada programa decide qué significa cada uno). En la terminal de Linux puedes ver el código del último programa con `echo $?`.
+
+> ➕ **Por qué es importante el `wait()`:**
+> - **Sincroniza:** el padre no sigue hasta que el hijo acaba (por ejemplo, para usar un resultado que calcula el hijo).
+> - **Evita zombies:** al recoger el estado del hijo, el sistema puede borrarlo de la tabla de procesos. Sin `wait()`, el hijo terminado queda como **zombie** (`Z`) mientras el padre siga vivo, como pasa en el Ejemplo 4.
+> - Si hay **varios hijos**, cada `wait()` recoge **uno** (el primero que termine). Para esperar a un hijo concreto: `os.waitpid(pid_del_hijo, 0)`.
+
+> ✏️ **Detalles:**
+> - `os.waitstatus_to_exitcode()` existe desde **Python 3.9**. En versiones anteriores se usaba `os.WEXITSTATUS(status)`.
+> - El `input()` lo hace el **hijo**: padre e hijo comparten la misma terminal (la entrada estándar se hereda con el `fork`). Funciona porque el padre está bloqueado en el `wait()` y no lee nada. Si los dos leyeran del teclado a la vez, no se sabría cuál se lleva cada línea.
+> - Como `fork()`, `wait()` solo existe en **Linux/macOS**: ejecútalo en **WSL**.
 
 ---
 
@@ -345,20 +430,5 @@ Los dos 5123
 - **n bits → 2ⁿ valores** · 32 bits → 4 GiB.
 - Caché **L1** (por núcleo, separada en datos e instrucciones = Harvard) · **L2** (por núcleo) · **L3** (compartida).
 - `os.fork()` → **0 en el hijo**, **PID del hijo en el padre** · `os.getpid()` · `os.getppid()` · el orden **no está garantizado**.
-
----
-
-iteraciones <- programa 2
-
----
-programa 3 \/
-Pid, status = os.wait() -> estoy esperando a que los hijos del fork terminen
-
-pid se queda con el identificador dl procesos
-status se queda con el estado de la salida.
-
-sys
-
-codigo = os.waitstatus_to_exitcode(status) -> cambia el estado codificado del numero a exitcode
-
----
+- Padre e hijo con bucles y `sleep` → salida **intercalada** (concurrencia); cada uno tiene **sus propias variables**.
+- `pid, status = os.wait()` → el padre **espera** a que termine un hijo (orden garantizado, sin zombies) · `sys.exit(n)` → código de salida (0 = bien) · `os.waitstatus_to_exitcode(status)` → descodifica el estado.
