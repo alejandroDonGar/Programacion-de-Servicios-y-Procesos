@@ -345,3 +345,20 @@ Los dos 5123
 - **n bits → 2ⁿ valores** · 32 bits → 4 GiB.
 - Caché **L1** (por núcleo, separada en datos e instrucciones = Harvard) · **L2** (por núcleo) · **L3** (compartida).
 - `os.fork()` → **0 en el hijo**, **PID del hijo en el padre** · `os.getpid()` · `os.getppid()` · el orden **no está garantizado**.
+
+---
+
+iteraciones <- programa 2
+
+---
+programa 3 \/
+Pid, status = os.wait() -> estoy esperando a que los hijos del fork terminen
+
+pid se queda con el identificador dl procesos
+status se queda con el estado de la salida.
+
+sys
+
+codigo = os.waitstatus_to_exitcode(status) -> cambia el estado codificado del numero a exitcode
+
+---
