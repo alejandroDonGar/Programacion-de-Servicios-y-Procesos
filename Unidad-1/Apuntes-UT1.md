@@ -73,6 +73,23 @@ El sistema operativo hace esto miles de veces por segundo. Como cambia tan rápi
 
 > ✏️ **Corrección:** en las notas pone "Pila → 1487" entre 1498 y la siguiente posición. Es una errata: debería ser **1497**, porque cada valor guardado baja una posición.
 
+### El PCB: dónde guarda el sistema operativo cada proceso
+
+Quien controla todo esto es el **sistema operativo**. Para cada proceso mantiene un **PCB** (*Process Control Block*, bloque de control del proceso), donde está **toda la información del proceso**: su PID, su estado, sus registros guardados, el PC, dónde está en memoria…
+
+- El **sistema operativo asigna las posiciones de memoria** que ocupa cada proceso.
+- Cuando hay un cambio de contexto, la CPU **guarda los registros en la pila del proceso** (antes de que el kernel entre a trabajar) y los restaura al volver. La pila se gestiona con el registro **SP** y es **LIFO**.
+- Dentro de la memoria de un proceso hay varias zonas:
+
+```
+PC ──> código        (las instrucciones del programa; el PC apunta a la que toca)
+       datos
+       variables
+       pila   <── SP (LIFO: crece hacia direcciones más bajas)
+```
+
+Esto es clave para entender dos cosas que vienen después: **`fork` copia el PCB** (sección 5) y un **hilo** reparte el PC dentro de un mismo PCB (sección 6).
+
 ### Concurrencia y paralelismo
 
 | | **Concurrencia** | **Paralelismo** |
@@ -218,6 +235,8 @@ lscpu → Cachés:
 | Si falla | Lanza una excepción `OSError` |
 
 Así es como cada proceso sabe cuál de los dos es.
+
+> ➕ **Por dentro:** `fork()` **copia el PCB** del padre para crear el del hijo, y le **asigna posiciones de memoria nuevas**. Por eso, aunque el código sea el mismo, cada proceso tiene su propia copia de variables y de pila (ver Ejemplo 4) y un PID distinto.
 
 > ⚠️ `os.fork()` **solo existe en Linux/macOS**. En Windows da error, así que **ejecuta estos programas en WSL** con `python3 programa.py`.
 
@@ -417,6 +436,141 @@ Soy el padre con PID: 5123. El hijo ha terminado con PID: 5124 y estado: 5
 > - El `input()` lo hace el **hijo**: padre e hijo comparten la misma terminal (la entrada estándar se hereda con el `fork`). Funciona porque el padre está bloqueado en el `wait()` y no lee nada. Si los dos leyeran del teclado a la vez, no se sabría cuál se lleva cada línea.
 > - Como `fork()`, `wait()` solo existe en **Linux/macOS**: ejecútalo en **WSL**.
 
+### Ejemplo 6: lanzar un programa externo y medir el tiempo (`programaPing.py`)
+
+`subprocess.run([...])` ejecuta **otro programa** del sistema (aquí `ping`) y **espera a que termine**. El comando se pasa como **lista**: primero el programa y después cada argumento.
+
+```python
+import subprocess, time
+
+ahora = time.time()          # tiempo actual, en segundos
+
+# ping -c 1 8.8.8.8  → una sola petición a la IP de Google
+for i in range(10):
+    subprocess.run(['ping', '-c 1', '8.8.8.8'])   # espera a que acabe antes de la siguiente
+
+# Cuánto ha pasado desde el principio hasta ahora
+print(time.time() - ahora)
+```
+
+- `-c 1` → *count*: manda **1** paquete y termina (sin esto, `ping` no acabaría nunca en Linux).
+- Los 10 pings van **uno detrás de otro**: cada `run` bloquea el programa hasta que su ping termina. El tiempo total es **la suma** de los 10.
+- `time.time()` devuelve los segundos desde 1970. Restar el de antes y el de después da **cuánto ha tardado**.
+
+### Ejemplo 7: 10 pings a la vez con `fork` (`programaPing2.py`)
+
+Ahora el padre **crea 10 hijos** y cada uno lanza su ping. Así **se hacen a la vez** en lugar de en fila.
+
+```python
+import os, subprocess, time, sys
+
+ahora = time.time()
+
+for i in range(10):
+    pid = os.fork()      # el padre crea un hijo y vuelve al bucle a crear el siguiente
+
+    if pid == 0:         # entran SOLO los hijos
+        subprocess.run(['ping', '-c 2', '-i 2', '8.8.8.8'])
+        sys.exit()       # el hijo termina aquí; si no, seguiría el bucle y crearía sus propios hijos
+
+# Cuando el padre ha creado los 10 hijos, llega aquí
+for i in range(10):
+    os.wait()            # cada wait() recoge a un hijo que haya terminado
+
+print(time.time() - ahora)
+```
+
+**Cómo leerlo:**
+- El padre da las 10 vueltas del `for` creando un hijo en cada una. Los hijos pueden arrancar **dentro del mismo *quantum*** (el trocito de tiempo de CPU que da el sistema) o repartidos en varios; no importa, el sistema los va turnando.
+- `-c 2 -i 2` → manda **2** paquetes con **2 segundos** de intervalo entre ellos.
+- Se forma una cadena **padre → hijo → nieto**: cada hijo lanza `ping` con `subprocess.run`, así que `ping` es el **nieto** del proceso original. En total, 10 hijos y 10 `ping`.
+- **`sys.exit()` es imprescindible:** sin él, el hijo terminaría el `subprocess.run` y volvería al `for`, creando más procesos (una "bomba fork").
+- Los **10 `os.wait()`** hacen que el padre espere a que acaben los 10 hijos antes de medir el tiempo (así se recogen todos y no quedan zombies).
+- **Resultado esperado:** el tiempo total sale parecido al de **un solo** ping (unos 2 segundos de intervalo más el ping), no a la suma de los 10 como en el Ejemplo 6. Es la ventaja de la concurrencia: se aprovechan los tiempos de espera de unos procesos para ejecutar otros. *(Pendiente: pegar aquí los tiempos reales de tu ejecución.)*
+
+> ✏️ **Detalle:** `'-c 2'` (con el espacio dentro de la cadena) es un único argumento. En la práctica `ping` suele aceptarlo, pero lo limpio es separar flag y valor: `['ping', '-c', '2', '-i', '2', '8.8.8.8']`.
+
+---
+
+## 6. Hilos (*threads*)
+
+### El problema de los procesos
+
+Con `fork`, para hacer varias cosas a la vez **clonamos todo el proceso**: nuevo PCB, nueva memoria, nuevo PID. Funciona, pero es pesado, y padre e hijo **no comparten variables** (cada uno tiene su copia).
+
+### La idea del hilo
+
+Dentro del PCB está el código que se va a ejecutar, y el **PC** marca por dónde vamos. Un programa suele tener **varias funciones** que hacen cosas distintas: hacer un ping, imprimir en pantalla, etc. Si las ejecutamos de forma concurrente, hay una alternativa a clonar el proceso:
+
+- En vez de tener **un solo PC**, el proceso tiene **varios PC dentro del mismo PCB**, cada uno apuntando a **una función distinta** (a una posición distinta del código en memoria).
+- El sistema puede ir **saltando de uno a otro** manteniendo la coherencia: **mismo proceso, órdenes distintas**.
+- Esto se llama **hilo** (*thread*). Si hay 3 PC, hay **3 hilos**: **1 proceso con 3 hilos**.
+- Así, en lugar de que un proceso se quede **bloqueado** esperando (y se pierda su turno), otro hilo del mismo proceso puede aprovechar el *quantum*.
+
+```
+Proceso (un solo PCB, un solo PID)
+├── código, datos, variables  ← compartidos por todos los hilos
+├── Hilo 1: su PC y su pila ──> función A (ping)
+├── Hilo 2: su PC y su pila ──> función B (imprimir)
+└── Hilo 3: su PC y su pila ──> función C
+```
+
+| | **Procesos (`fork`)** | **Hilos** |
+|---|---|---|
+| Memoria | **Copia** distinta para cada uno | **Compartida** (misma memoria del proceso) |
+| PID | Uno por proceso | **El mismo** para todos los hilos |
+| Relación | Padre e hijo | **No hay padres ni hijos**: es el mismo proceso |
+| Coste de crearlos | Alto (se copia el PCB) | Bajo |
+| Quién los reparte | El sistema operativo | El sistema operativo (cualquier hilo listo puede ser el siguiente: el orden no está garantizado) |
+
+> ✏️ **Matiz:** en clase se dijo que "el sistema lanza un dado con el número de hilos". Es una forma gráfica de decir que **el orden en que se turnan no está garantizado**. En realidad lo decide el planificador del sistema operativo.
+>
+> Cada hilo sí tiene **su propio PC y su propia pila** (si no, no sabría por dónde va ni dónde guardar sus variables locales); lo que comparten es el **código y los datos**.
+
+### Ejemplo 8: el primer hilo (`hilo1.py`)
+
+```python
+import threading, time
+
+def Saludando():
+    # time.sleep(1)  ← si lo ponemos AQUÍ, el hilo principal imprime antes
+    print("Hola, soy el hilo secundario")
+
+print("Soy el Main Thread o Hilo Principal")
+
+# Creamos el objeto Thread y le decimos QUÉ función ejecutará (target)
+t = threading.Thread(target=Saludando)   # sin paréntesis: pasamos la función, no la llamamos
+
+t.start()   # arranca el hilo: ya está listo para que el sistema le dé CPU
+
+# time.sleep(1)  ← si lo ponemos AQUÍ, el sistema saca al principal y deja trabajar al hilo
+print("Soy el Main Thread o Hilo Principal despues")
+```
+
+**Paso a paso:**
+
+| Instrucción | Qué hace |
+|---|---|
+| `threading.Thread(target=Saludando)` | **Crea** el hilo y le asigna la función que ejecutará. Todavía **no corre**. Es como añadir un PC nuevo apuntando a esa función |
+| `t.start()` | **Lo lanza**. A partir de aquí hay **dos hilos** en el mismo proceso: el principal (*main thread*) y `t` |
+| Hilo principal | Todo programa ya tiene uno: el que ejecuta el código "normal" |
+
+**Qué orden sale:** después de `t.start()`, el hilo secundario **puede o no** ejecutarse antes de que el principal imprima su última línea; **depende de cuándo le dé *quantum* el sistema operativo**. Lo habitual es:
+
+```
+Soy el Main Thread o Hilo Principal
+Soy el Main Thread o Hilo Principal despues
+Hola, soy el hilo secundario
+```
+
+pero también puede salir el saludo en medio. Se puede **forzar** con `time.sleep()`:
+- `sleep` **dentro de `Saludando`** → el secundario se bloquea y el principal acaba su `print` primero.
+- `sleep` **en el principal tras `start()`** → el sistema **saca al principal de la CPU** y el hilo secundario tiene tiempo de imprimir.
+
+Igual que con `fork` y `sleep` (Ejemplo 3), esto hace el orden **muy probable pero no garantizado**. Para esperar de verdad a un hilo se usa `t.join()`, el equivalente de `os.wait()` para hilos.
+
+> ➕ **Diferencia clave con `fork`:** aquí `os.getpid()` valdría **lo mismo** en los dos hilos, porque es **un único proceso**. Con `fork` salían dos PID distintos.
+
 ---
 
 ## Resumen rápido
@@ -432,21 +586,6 @@ Soy el padre con PID: 5123. El hijo ha terminado con PID: 5124 y estado: 5
 - `os.fork()` → **0 en el hijo**, **PID del hijo en el padre** · `os.getpid()` · `os.getppid()` · el orden **no está garantizado**.
 - Padre e hijo con bucles y `sleep` → salida **intercalada** (concurrencia); cada uno tiene **sus propias variables**.
 - `pid, status = os.wait()` → el padre **espera** a que termine un hijo (orden garantizado, sin zombies) · `sys.exit(n)` → código de salida (0 = bien) · `os.waitstatus_to_exitcode(status)` → descodifica el estado.
-
----
-### A añadir al README de la clase de hoy
-- sistema operativo controla el pcb
-- el sistema operativo asigna las posiciones en memoria
-- la cpu antes de traerse el kernel, guarda los registros en la pila. La pila es un registro SP.
-- Memoria LIFO
-
-PC -> codigo
-      datos
-      variables
-      pila <- SP LIFO
-
-Fork copia el PCB cambiando las posiciones de memoria.
-- Nuevas pruebas programaPing y programaPing2
-
-- Dentro del pcb donde esta toda la info, está el codigo a ejecutar contado por el PC, dentor de las instrucciones del programa, tenemos vairas funciones que hagan cosas distintas, para hacer ping, imprimir en pantalla y demas. ¿Que pasa si se ejecutan de manera concurrente? El PC en vez de estar en el PCB, lo movemos a otras zona del pcb pero con valores distintso, cada PC apuntando a cada funcion concreta, a cada posicion en memoria del codigo. Podemos terner mas tiempo de quantum en vez de bloqueado si en ve de detener un proceso por seguir un orden determinado, podemos asignar distintos PC a diferentes partes del codigo para ir saltando entre ellas manteniendo la coherencia, manteniendo siempre el PID del proceso original. Mismo proceso, ordenes distintas. Esto se llama **Hilo**.
-Si tenemos replicado el PC 3 veces es porque vamos a ejecutar 3 partes diferentes, o 3 hilos. 1 proceso con 3 hilos.  La diferencia con clonar el proceso es que no clonamos la memoria, por lo que diferentes partes del codigo acceden siempre al mismo PID por ejemplo. El sistema lanza un dado con el número de hilos, y el que salga carga ese hilo y lo lleva a la cpu. Aqui no habrian padres ni hijos por ser el mismo proceso.
+- **PCB:** donde el sistema operativo guarda toda la información de un proceso · memoria del proceso = código, datos, variables y pila (SP). `fork` **copia el PCB**.
+- `subprocess.run([...])` lanza un programa externo y espera · `time.time()` para medir tiempos · 10 `fork` + 10 `wait()` hacen los pings **a la vez** en lugar de en fila.
+- **Hilo:** varios PC dentro del **mismo proceso** (mismo PCB, mismo PID, memoria compartida, sin padre/hijo) · `threading.Thread(target=f)` + `t.start()` (+ `t.join()` para esperar) · el orden entre hilos **no está garantizado**.
