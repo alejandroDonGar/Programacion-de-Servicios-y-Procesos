@@ -432,3 +432,21 @@ Soy el padre con PID: 5123. El hijo ha terminado con PID: 5124 y estado: 5
 - `os.fork()` → **0 en el hijo**, **PID del hijo en el padre** · `os.getpid()` · `os.getppid()` · el orden **no está garantizado**.
 - Padre e hijo con bucles y `sleep` → salida **intercalada** (concurrencia); cada uno tiene **sus propias variables**.
 - `pid, status = os.wait()` → el padre **espera** a que termine un hijo (orden garantizado, sin zombies) · `sys.exit(n)` → código de salida (0 = bien) · `os.waitstatus_to_exitcode(status)` → descodifica el estado.
+
+---
+### A añadir al README de la clase de hoy
+- sistema operativo controla el pcb
+- el sistema operativo asigna las posiciones en memoria
+- la cpu antes de traerse el kernel, guarda los registros en la pila. La pila es un registro SP.
+- Memoria LIFO
+
+PC -> codigo
+      datos
+      variables
+      pila <- SP LIFO
+
+Fork copia el PCB cambiando las posiciones de memoria.
+- Nuevas pruebas programaPing y programaPing2
+
+- Dentro del pcb donde esta toda la info, está el codigo a ejecutar contado por el PC, dentor de las instrucciones del programa, tenemos vairas funciones que hagan cosas distintas, para hacer ping, imprimir en pantalla y demas. ¿Que pasa si se ejecutan de manera concurrente? El PC en vez de estar en el PCB, lo movemos a otras zona del pcb pero con valores distintso, cada PC apuntando a cada funcion concreta, a cada posicion en memoria del codigo. Podemos terner mas tiempo de quantum en vez de bloqueado si en ve de detener un proceso por seguir un orden determinado, podemos asignar distintos PC a diferentes partes del codigo para ir saltando entre ellas manteniendo la coherencia, manteniendo siempre el PID del proceso original. Mismo proceso, ordenes distintas. Esto se llama **Hilo**.
+Si tenemos replicado el PC 3 veces es porque vamos a ejecutar 3 partes diferentes, o 3 hilos. 1 proceso con 3 hilos.  La diferencia con clonar el proceso es que no clonamos la memoria, por lo que diferentes partes del codigo acceden siempre al mismo PID por ejemplo. El sistema lanza un dado con el número de hilos, y el que salga carga ese hilo y lo lleva a la cpu. Aqui no habrian padres ni hijos por ser el mismo proceso.
