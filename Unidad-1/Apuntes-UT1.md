@@ -551,7 +551,7 @@ print("Soy el Main Thread o Hilo Principal despues")
 
 | Instrucción | Qué hace |
 |---|---|
-| `threading.Thread(target=Saludando)` | **Crea** el hilo y le asigna la función que ejecutará. Todavía **no corre**. Es como añadir un PC nuevo apuntando a esa función |
+| `t = threading.Thread(target=Saludando)` | **Crea** el hilo y le asigna la función que ejecutará. Todavía **no corre**. Es como añadir un PC nuevo apuntando a esa función |
 | `t.start()` | **Lo lanza**. A partir de aquí hay **dos hilos** en el mismo proceso: el principal (*main thread*) y `t` |
 | Hilo principal | Todo programa ya tiene uno: el que ejecuta el código "normal" |
 
@@ -589,3 +589,80 @@ Igual que con `fork` y `sleep` (Ejemplo 3), esto hace el orden **muy probable pe
 - **PCB:** donde el sistema operativo guarda toda la información de un proceso · memoria del proceso = código, datos, variables y pila (SP). `fork` **copia el PCB**.
 - `subprocess.run([...])` lanza un programa externo y espera · `time.time()` para medir tiempos · 10 `fork` + 10 `wait()` hacen los pings **a la vez** en lugar de en fila.
 - **Hilo:** varios PC dentro del **mismo proceso** (mismo PCB, mismo PID, memoria compartida, sin padre/hijo) · `threading.Thread(target=f)` + `t.start()` (+ `t.join()` para esperar) · el orden entre hilos **no está garantizado**.
+
+
+---
+
+**Temario del dia 13.10.2026**
+
+variables locales y globales.
+
+def suma();
+    a=7
+    b=8
+    x=8+7
+    lista[8]
+    suma()
+    return
+
+lista[] = "abcdefghijk"
+
+Siguardamos el contador dentro de la pila, y machacamos el valor porque la lista es mas grande que los valores que pude almacenar la lista oroginal nos cargamos los valores que existian en la pila y ahora el PC no apuntara a donde tiene que ir sino a los nuevos valores.
+
+La cpu no para simplemente sigue ejecutando pero ahora apunta a otra operacion.
+
+Desbordamiento del buffer.
+
+Por esto vienen los hilos. Capturamos diferentes partes del codigo y lo asinamos a diferentes funciones, así no dejamos al codigo solo decidir a donde ir, pudiendo saltarse el siguiente puntero si hubo desbordamiento. 
+
+
+(No sé si está bien explicado)
+
+PCB 
+   ---
+
+           PID, PPID
+
+            Usuario
+
+            Privilegios
+
+            memoria
+
+    ---
+
+    MainThread 
+                Estado
+                Foto de la cpu = todos los registros del hilo.
+
+    ---
+
+    Hilo secundario
+
+                Estado
+                Foto de la cpu = todos los registro del hilo
+
+Ejercicio hilo13.10.2026.py
+
+sale como 
+
+**python3 hilo13.10.2026.py**
+
+**xYxYxYYxxYYxxYxYxYxYYxYxxYYxYxYxxYYxYxxYxYYxxYxYxYxYYxxYxYxYxYYxxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYYxxYYxxYxYYxxYYxxYxYxYxYxYxYxYxYYxxYxYYxYxxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYYxxYxYYxYxxYxYxYxYxYxYxYxYxYxYxYYxYxxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYYxYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxxYYxxYYxxYxYxYYxYxxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYYxxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYYxYxxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxYxxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxYxxYxYxYxYxYYxYxxYYxxYxYxYYxxYxYYxxYYxxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYxYYxxYYxxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYYxYxxYxYYxxYxYxYxYxYxYxYxYYxxYxYxYxYYxxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYYxxYYxxYYxxYYxxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxxYxYxYxYxYxYxYxYYxxYxYYxxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYx**
+
+**YYYYAlejandroDonate@debian-des:**
+
+
+con el salto de linea porque en el programa, el print("\n") esta dentro del hilo principal. Cuando termina el for del hilo principal, se ejecuta el salto de linea faltandole do "y" al hilo, por lo que se ejecuta el salto de linea y aparecen las dos ultimas yy.
+
+Al ser parte del mismo proceso, proceso tiene que esperar a que el hilo secundario termine aunque el principal ya haya acabado.
+
+No puede haber hilo sin proceso pero si varios hilos dentro de un proceso.
+
+Cuando creamos varios hilos se suelen meter dentro de una lista
+
+Ejercicio diez_hilos.py
+
+--- 
+
+En la proxima clase veremos a como forzar que los hilos terminan cuando termina el principal.
