@@ -571,6 +571,160 @@ Igual que con `fork` y `sleep` (Ejemplo 3), esto hace el orden **muy probable pe
 
 > ➕ **Diferencia clave con `fork`:** aquí `os.getpid()` valdría **lo mismo** en los dos hilos, porque es **un único proceso**. Con `fork` salían dos PID distintos.
 
+### Variables locales, la pila y el desbordamiento de búfer
+
+Las **variables locales** de una función viven en la **pila** (la que señala el SP). Cada vez que se llama a una función se apila un "marco" con:
+
+- sus variables locales (`a`, `b`, `x`, un array `lista`…),
+- la **dirección de retorno**: el valor del PC al que hay que volver cuando la función termine (`return`).
+
+Las **variables globales**, en cambio, están en la zona de datos del proceso, fuera de la pila.
+
+Ejemplo de clase (en pseudocódigo tipo C, que es donde pasa esto):
+
+```c
+char lista[8];          // espacio para 8 caracteres
+
+void suma() {
+    int a = 7;
+    int b = 8;
+    int x = a + b;
+    strcpy(lista, "abcdefghijk");   // ¡11 caracteres + '\0' en un hueco de 8!
+    return;             // vuelve a la dirección guardada en la pila... si sigue intacta
+}
+```
+
+Si copiamos en un array **más datos de los que caben**, los que sobran **machacan lo que hay justo al lado en la pila**, incluida la dirección de retorno. Al hacer `return`, el PC se carga con ese valor machacado y la CPU salta **a donde digan los datos nuevos**, no a donde debía volver.
+
+La CPU **no se para ni avisa**: simplemente sigue ejecutando lo que haya en esa dirección. Esto es el **desbordamiento de búfer** (*buffer overflow*): si un atacante controla los datos que se copian, puede decidir a dónde salta el programa.
+
+> ✏️ **Corrección:** en las notas de clase quedó apuntado que "por esto vienen los hilos". Los hilos **no** nacen para evitar el desbordamiento de búfer: nacen para hacer varias cosas a la vez dentro de un proceso sin el coste de `fork` (apartado anterior). La relación entre ambos temas es que **cada hilo tiene su propia pila** (sus propias variables locales y direcciones de retorno), así que entender la pila ayuda a entender qué guarda cada hilo.
+>
+> Contra el desbordamiento lo que se usa es: lenguajes que **comprueban los límites** (en Python `lista[8]` sobre una lista más corta lanza `IndexError` en vez de escribir fuera), y protecciones del sistema y del compilador (*canarios* en la pila, ASLR, memoria no ejecutable).
+
+### El PCB de un proceso con varios hilos
+
+Lo que es **del proceso** se guarda una sola vez; lo que es **de cada hilo** se guarda por separado:
+
+```
+PCB (proceso)
+├── PID, PPID
+├── Usuario
+├── Privilegios
+├── Memoria (código, datos, variables globales)
+│
+├── MainThread (hilo principal)
+│     ├── Estado (listo, ejecutando, bloqueado…)
+│     └── Foto de la CPU = todos sus registros (PC, SP…) y su pila
+│
+└── Hilo secundario
+      ├── Estado
+      └── Foto de la CPU = todos sus registros (PC, SP…) y su pila
+```
+
+En el cambio de contexto entre dos hilos del **mismo** proceso solo hay que guardar y restaurar esa "foto de la CPU"; la memoria es la misma, por eso es más barato que cambiar de proceso.
+
+> ➕ **Ampliación:** la parte de cada hilo se suele llamar **TCB** (*Thread Control Block*, bloque de control del hilo).
+
+Reglas que salen de aquí:
+- **No puede haber un hilo sin proceso**, pero sí **varios hilos dentro de un proceso**.
+- El proceso **no termina** hasta que acaban **todos** sus hilos (los normales): aunque el hilo principal llegue al final del programa, el proceso espera a los secundarios.
+
+### Ejemplo 9: dos hilos escribiendo a la vez (`hilo13.10.2026.py`)
+
+```python
+import threading, time
+
+hilos = []
+
+def otro_hilo():
+    for i in range(1000):
+        time.sleep(0.001)
+        print("Y", end="", flush=True)   # end="" → sin salto de línea; flush=True → se ve al momento
+
+t = threading.Thread(target=otro_hilo)  # crea el hilo
+t.start()                               # ahora sí se ejecuta
+hilos.append(t)                         # lo guardamos en la lista
+print(t.name)                           # nombre del hilo: "Thread-1 (otro_hilo)"
+
+# Hilo principal (MainThread)
+for i in range(1000):
+    time.sleep(0.001)
+    print("x", end="", flush=True)
+
+print("\n", end="")                     # salto de línea: lo hace el hilo PRINCIPAL
+
+t = threading.Thread(target=otro_hilo)  # segundo hilo secundario
+t.start()
+hilos.append(t)
+print(t.name)
+
+for hilo in hilos:
+    print(hilo.name)                    # nombre de cada hilo de la lista
+```
+
+**Qué se ve:** las `x` (hilo principal) y las `Y` (hilo secundario) salen **intercaladas** y sin un patrón fijo, porque los dos se turnan la CPU y cada `sleep(0.001)` cede el turno. Salida real en clase (recortada), con la versión que solo lanzaba **un** hilo secundario:
+
+```
+$ python3 hilo13.10.2026.py
+xYxYxYYxxYYxxYxYxYxYYxYxxYYxYxYxxYYxYxxYxYYxxYxYxYxYYxx … xYxYxYxYxYxYxYxYxYxYx
+YYYYAlejandroDonate@debian-des:
+```
+
+**Por qué salen `YYYY` después del salto de línea y pegadas al *prompt*:**
+
+1. El `print("\n")` está en el **hilo principal**, justo después de su `for`.
+2. El principal terminó sus 1000 `x` cuando al secundario aún **le quedaban algunas `Y`** (ninguno espera al otro).
+3. Se imprime el salto de línea y, después, el secundario escribe sus últimas `Y` en la línea nueva.
+4. El proceso no acaba hasta que termina el secundario, pero como esas `Y` no llevan `\n` al final, el *prompt* de la terminal aparece pegado a ellas.
+
+> ⏳ **Pendiente:** la versión actual del archivo lanza además un **segundo** hilo y escribe los nombres de la lista (`Thread-1 (otro_hilo)`, `Thread-2 (otro_hilo)`). Falta apuntar la salida real de esa versión.
+>
+> ➕ Para que el salto de línea salga siempre **después** de todas las `Y`, el principal tendría que esperar con `t.join()` antes del `print("\n")`.
+
+### Ejemplo 10: varios hilos en una lista (`diez_hilos.py`)
+
+Cuando se crean muchos hilos, lo normal es **guardarlos en una lista** para luego arrancarlos, esperarlos o consultarlos recorriéndola.
+
+```python
+import threading
+
+def hilo():
+    print(f"{threading.current_thread().name}")   # nombre del hilo que lo ejecuta (parecido a getpid())
+
+def entrada():
+    dato = input("Dame el dato")   # se queda bloqueado hasta que escribamos algo
+
+hilos = []
+t = threading.Thread(target=entrada)
+t.start()
+
+print(f"{threading.current_thread().name}")   # aquí es el principal: "MainThread"
+
+for i in range(10):                 # crea 10 hilos (todavía sin arrancar)
+    t = threading.Thread(target=hilo)
+    hilos.append(t)
+
+for i in hilos:
+    i.start()                       # arranca cada uno: cada hilo imprime su nombre
+```
+
+**Qué pasa:**
+
+| Hilo | Qué hace |
+|---|---|
+| `Thread-1 (entrada)` | Pide un dato con `input()` y se queda **bloqueado** esperando el teclado |
+| `MainThread` | Imprime su nombre, crea los 10 hilos, los arranca y llega al final |
+| `Thread-2 (hilo)` … `Thread-11 (hilo)` | Cada uno imprime su nombre y termina |
+
+Todos terminan enseguida **menos el de `entrada`**, así que el **proceso sigue vivo** esperando a que escribamos algo. Por eso, si abrimos otra terminal (con `ps aux`, por ejemplo), el proceso aparece todavía activo.
+
+> ✏️ **Corrección:** el comentario del archivo dice que `input()` "para el main thread". En este programa el `input()` está en un **hilo secundario**, así que el que se bloquea es ese hilo; el principal sigue y termina. Lo que no termina es el **proceso**, porque espera a todos sus hilos.
+>
+> ⏳ **Pendiente:** apuntar la salida real (el orden de los nombres puede cambiar en cada ejecución).
+
+**Próxima clase:** cómo hacer que los hilos secundarios terminen **cuando termina el principal**, en lugar de que el proceso se quede esperándolos.
+
 ---
 
 ## Resumen rápido
@@ -589,80 +743,7 @@ Igual que con `fork` y `sleep` (Ejemplo 3), esto hace el orden **muy probable pe
 - **PCB:** donde el sistema operativo guarda toda la información de un proceso · memoria del proceso = código, datos, variables y pila (SP). `fork` **copia el PCB**.
 - `subprocess.run([...])` lanza un programa externo y espera · `time.time()` para medir tiempos · 10 `fork` + 10 `wait()` hacen los pings **a la vez** en lugar de en fila.
 - **Hilo:** varios PC dentro del **mismo proceso** (mismo PCB, mismo PID, memoria compartida, sin padre/hijo) · `threading.Thread(target=f)` + `t.start()` (+ `t.join()` para esperar) · el orden entre hilos **no está garantizado**.
+- **Pila:** variables locales + dirección de retorno de cada función · escribir fuera de un array machaca la dirección de retorno y el PC salta a otro sitio = **desbordamiento de búfer** (la CPU no se para).
+- **PCB con hilos:** PID, PPID, usuario, privilegios y memoria son del proceso · cada hilo tiene su **estado** y su **foto de la CPU** (registros, PC, SP, pila).
+- No hay hilo sin proceso · el proceso **espera a que acaben todos sus hilos** aunque el principal haya terminado · los hilos se suelen guardar en una **lista** · `threading.current_thread().name` y `t.name` dan el nombre del hilo.
 
-
----
-
-**Temario del dia 13.10.2026**
-
-variables locales y globales.
-
-def suma();
-    a=7
-    b=8
-    x=8+7
-    lista[8]
-    suma()
-    return
-
-lista[] = "abcdefghijk"
-
-Siguardamos el contador dentro de la pila, y machacamos el valor porque la lista es mas grande que los valores que pude almacenar la lista oroginal nos cargamos los valores que existian en la pila y ahora el PC no apuntara a donde tiene que ir sino a los nuevos valores.
-
-La cpu no para simplemente sigue ejecutando pero ahora apunta a otra operacion.
-
-Desbordamiento del buffer.
-
-Por esto vienen los hilos. Capturamos diferentes partes del codigo y lo asinamos a diferentes funciones, así no dejamos al codigo solo decidir a donde ir, pudiendo saltarse el siguiente puntero si hubo desbordamiento. 
-
-
-(No sé si está bien explicado)
-
-PCB 
-   ---
-
-           PID, PPID
-
-            Usuario
-
-            Privilegios
-
-            memoria
-
-    ---
-
-    MainThread 
-                Estado
-                Foto de la cpu = todos los registros del hilo.
-
-    ---
-
-    Hilo secundario
-
-                Estado
-                Foto de la cpu = todos los registro del hilo
-
-Ejercicio hilo13.10.2026.py
-
-sale como 
-
-**python3 hilo13.10.2026.py**
-
-**xYxYxYYxxYYxxYxYxYxYYxYxxYYxYxYxxYYxYxxYxYYxxYxYxYxYYxxYxYxYxYYxxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYYxxYYxxYxYYxxYYxxYxYxYxYxYxYxYxYYxxYxYYxYxxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYYxxYxYYxYxxYxYxYxYxYxYxYxYxYxYxYYxYxxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYYxYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxxYYxxYYxxYxYxYYxYxxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYYxxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYYxYxxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYYxYxxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxYxxYxYxYxYxYYxYxxYYxxYxYxYYxxYxYYxxYYxxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYxYYxxYYxxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYYxYxxYxYYxxYxYxYxYxYxYxYxYYxxYxYxYxYYxxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYYxxYYxxYYxxYYxxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxxYxYxYxYxYxYxYxYYxxYxYYxxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYYxxYYxxYxYxYxYxYxYYxxYxYYxxYxYxYYxxYxYxYxYxYxYxYxYYxxYxYYxxYxYxYxYxYxYxYxYxYYxxYxYxYxYxYYxxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYxYx**
-
-**YYYYAlejandroDonate@debian-des:**
-
-
-con el salto de linea porque en el programa, el print("\n") esta dentro del hilo principal. Cuando termina el for del hilo principal, se ejecuta el salto de linea faltandole do "y" al hilo, por lo que se ejecuta el salto de linea y aparecen las dos ultimas yy.
-
-Al ser parte del mismo proceso, proceso tiene que esperar a que el hilo secundario termine aunque el principal ya haya acabado.
-
-No puede haber hilo sin proceso pero si varios hilos dentro de un proceso.
-
-Cuando creamos varios hilos se suelen meter dentro de una lista
-
-Ejercicio diez_hilos.py
-
---- 
-
-En la proxima clase veremos a como forzar que los hilos terminan cuando termina el principal.
