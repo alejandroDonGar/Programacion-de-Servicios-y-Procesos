@@ -723,7 +723,39 @@ Todos terminan enseguida **menos el de `entrada`**, así que el **proceso sigue 
 >
 > ⏳ **Pendiente:** apuntar la salida real (el orden de los nombres puede cambiar en cada ejecución).
 
-**Próxima clase:** cómo hacer que los hilos secundarios terminen **cuando termina el principal**, en lugar de que el proceso se quede esperándolos.
+### ¿Por qué el hilo principal espera a los hilos hijos? La propiedad `daemon`
+
+Cada hilo tiene la propiedad **`daemon`**, cuyo valor por defecto es **`False`**:
+
+| `daemon` | Tipo de hilo | Qué pasa cuando termina el hilo principal |
+|---|---|---|
+| `False` (por defecto) | **No daemon** | El proceso **espera** a que acabe. Por eso hasta ahora el programa no terminaba hasta que acababan todos los hilos |
+| `True` | **Daemon** | Al terminar el principal (y todos los no daemon) el **proceso termina** y el hilo daemon se **corta en seco**, aunque no haya acabado |
+
+En resumen: el principal espera a **todos sus hijos no daemon**; los daemon no cuentan. Se usan para tareas de fondo que no deben mantener vivo el programa (vigilar algo, refrescar datos…).
+
+### Ejemplo 11: un hilo daemon y otro no (`hilo14.10.2026.py`)
+
+Es el programa del ejemplo 9 con dos cambios: el primer hilo se crea con `daemon=True` y las letras llevan el contador (`Y=0`, `X=0`…) para ver cuántas vueltas da cada hilo.
+
+```python
+t = threading.Thread(target=otro_hilo, daemon=True)  # hilo DAEMON: no retiene al proceso
+t.start()
+hilos.append(t)
+print(t.name)
+
+for i in range(1000):                 # hilo principal
+    time.sleep(0.001)
+    print(f"X={i}", end="", flush=True)
+
+t = threading.Thread(target=otro_hilo)   # segundo hilo: NO daemon (por defecto)
+t.start()
+hilos.append(t)
+```
+
+**Qué observar:** el segundo hilo (no daemon) siempre llega hasta `Y=999`, porque el proceso lo espera. El primero (daemon) solo se cortaría si el principal acabara **antes** que él; aquí el principal tarda más de 1 s y el daemon va a la par, así que normalmente le da tiempo a acabar.
+
+> ⏳ **Pendiente:** apuntar la salida real. Para ver el corte del daemon, reducir el `range` del principal (p. ej. 100 vueltas frente a 1000 del hilo daemon): las `Y` del daemon se quedarían a medias.
 
 ---
 
@@ -746,9 +778,4 @@ Todos terminan enseguida **menos el de `entrada`**, así que el **proceso sigue 
 - **Pila:** variables locales + dirección de retorno de cada función · escribir fuera de un array machaca la dirección de retorno y el PC salta a otro sitio = **desbordamiento de búfer** (la CPU no se para).
 - **PCB con hilos:** PID, PPID, usuario, privilegios y memoria son del proceso · cada hilo tiene su **estado** y su **foto de la CPU** (registros, PC, SP, pila).
 - No hay hilo sin proceso · el proceso **espera a que acaben todos sus hilos** aunque el principal haya terminado · los hilos se suelen guardar en una **lista** · `threading.current_thread().name` y `t.name` dan el nombre del hilo.
-
----
-tema 14.10.2026
-Porque el hilo principal tiene que esperar a que los hilos hijos termine?
-propiedad daemon de los hilos hijo. Tiene un valor por defecto -> false
-Es un hilo no daemon, que significa que el main thread va a esperar a que termine. El main espera por todos su hijos no daemon. Si fuera true y termina el main, se termina el proceso.
+- **`daemon`** (por defecto `False`): el principal espera a los hilos **no daemon**; con `daemon=True` el hilo se corta cuando termina el proceso · `Thread(target=f, daemon=True)`.
