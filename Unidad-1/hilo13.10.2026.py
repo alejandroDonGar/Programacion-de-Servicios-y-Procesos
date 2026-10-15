@@ -5,7 +5,7 @@ hilos=[]
 def otro_hilo():
 	for i in range(1000):
 		time.sleep(0.001)
-		print("Y", end="", flush=True) # Por si solo no hace nada porque no lo hemos llamado todavia
+		print(f"Y={i}", end="", flush=True) # Por si solo no hace nada porque no lo hemos llamado todavia
 
 t = threading.Thread(target=otro_hilo) # Crea el hilo
 t.start() # Ahora esta ejecutado
@@ -15,7 +15,7 @@ print(t.name) # Imprime el nombre del hilo
 # Main thread
 for i in range(1000):
 	time.sleep(0.001)
-	print("x", end="", flush=True)
+	print(f"X={i}", end="", flush=True)
 
 print("\n", end="")
 
