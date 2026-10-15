@@ -747,3 +747,8 @@ Todos terminan enseguida **menos el de `entrada`**, así que el **proceso sigue 
 - **PCB con hilos:** PID, PPID, usuario, privilegios y memoria son del proceso · cada hilo tiene su **estado** y su **foto de la CPU** (registros, PC, SP, pila).
 - No hay hilo sin proceso · el proceso **espera a que acaben todos sus hilos** aunque el principal haya terminado · los hilos se suelen guardar en una **lista** · `threading.current_thread().name` y `t.name` dan el nombre del hilo.
 
+---
+tema 14.10.2026
+Porque el hilo principal tiene que esperar a que los hilos hijos termine?
+propiedad daemon de los hilos hijo. Tiene un valor por defecto -> false
+Es un hilo no daemon, que significa que el main thread va a esperar a que termine. El main espera por todos su hijos no daemon. Si fuera true y termina el main, se termina el proceso.
