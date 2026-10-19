@@ -779,3 +779,30 @@ hilos.append(t)
 - **PCB con hilos:** PID, PPID, usuario, privilegios y memoria son del proceso · cada hilo tiene su **estado** y su **foto de la CPU** (registros, PC, SP, pila).
 - No hay hilo sin proceso · el proceso **espera a que acaben todos sus hilos** aunque el principal haya terminado · los hilos se suelen guardar en una **lista** · `threading.current_thread().name` y `t.name` dan el nombre del hilo.
 - **`daemon`** (por defecto `False`): el principal espera a los hilos **no daemon**; con `daemon=True` el hilo se corta cuando termina el proceso · `Thread(target=f, daemon=True)`.
+
+---
+temario 19.10.2026
+
+Software WEB server -> abriendo el puerto TCP/80
+pedido -> GET/index.html
+datagrama ip
+    ip.origien -> 10.108.99.11
+    p.origin -> 31425
+    hilo secundario envia los datos al cliente
+
+hilo principal vuelve a esperar a la siguiente peticion
+
+ejercicios realizado y realizadoConNombreHilos
+
+t=threading.Thread(target=funcion)
+t.start
+-mainThread-
+.   print("hola")
+.
+.
+.
+.   <PARAR> para que el hilo secundario termine -> se hace t.join()
+.   print("Secundario ha terminado")
+-mainThread-
+
+**Buscar errores en las explicaciones y corregir para la implementacion en el README(claude)**
