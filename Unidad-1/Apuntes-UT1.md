@@ -806,3 +806,286 @@ t.start
 -mainThread-
 
 **Buscar errores en las explicaciones y corregir para la implementacion en el README(claude)**
+
+---- 
+temario 22-10-2026
+
+ejercicio 'cerrando.py' sobre lock (Explicar que es y la diferencia entre lock y join, ver porque en uno no hace falta especificar el hilo y en el otro sí)
+
+"Regios critca" = Zona donde solo puede entrar un unico hilo.
+retultado del ejercicio:
+```
+dato=0 modificado por Thread-1 (suma)
+dato=1 modificado por Thread-2 (suma)
+dato=2 modificado por Thread-3 (suma)
+El MT imprime 3
+```
+puede ocurrir esto:
+
+```
+dato=0 modificado por Thread-1 (suma)
+dato=1 modificado por Thread-2 (suma)
+dato=1 modificado por Thread-3 (suma)
+El MT imprime 3
+```
+
+Esplicar porque ocurre esto.  El traerse datos y mostrar diferentes pero ver el mismo resultado final.
+
+Para controlar la region critica tambien esta el "semáforo" = threading.Semaphore(i). Va ha funcionar como el metodos 'acquire' y el 'release', Semaphore.acquire(), Semaphore.release(). 'i' indica cuantas llaves hay. En vez de ir uno por uno entrar 4, los que sean, y los demas esperan a que cualquiera salga.
+
+¿Por que querrias tener 4 o x hilos dentro? -> Explicar
+
+por ejemplo si te intenta explotar la pagina con muchas peticiones, puedes bloquear y limitar. Aunque hayna 1000, solo entran x
+
+(Buscar demas explicaciones o usos)
+
+---
+
+Ejercicio semaforo:
+respuesta:
+```
+Thread-1 (ping)
+Thread-2 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
+
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 27.629/27.629/27.629/0.000 ms
+rtt min/avg/max/mdev = 27.629/27.629/27.629/0.000 ms
+Thread-3 (ping)
+Thread-4 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.7 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.7 ms
+
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 27.739/27.739/27.739/0.000 ms
+rtt min/avg/max/mdev = 27.740/27.740/27.740/0.000 ms
+Thread-5 (ping)
+Thread-6 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.4 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.4 ms
+
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 27.416/27.416/27.416/0.000 ms
+rtt min/avg/max/mdev = 27.415/27.415/27.415/0.000 ms
+Thread-7 (ping)
+Thread-8 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.2 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.2 ms
+
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.199/28.199/28.199/0.000 ms
+rtt min/avg/max/mdev = 28.199/28.199/28.199/0.000 ms
+Thread-9 (ping)
+Thread-10 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.5 ms
+
+--- 8.8.8.8 ping statistics ---
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.5 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+
+rtt min/avg/max/mdev = 28.479/28.479/28.479/0.000 ms
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.479/28.479/28.479/0.000 ms
+
+```
+Aqui van los diez por cada dos, ejecutandose 10 en 5 segundo
+
+Podemos ejegir cuantos hilos entran pero no cuales. Podriamos tener el 1-2, 3-4, 5-6 etc... o 1-2, 3-9, 4-6 etc...
+
+---
+
+Ejercicio 10pings:
+respuesta:
+```
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+--- 8.8.8.8 ping statistics ---
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+--- 8.8.8.8 ping statistics ---
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.8 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.764/28.764/28.764/0.000 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.652/28.652/28.652/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.8 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.764/28.764/28.764/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
+
+```
+
+Aqui van los diez a la vez, ejecutandose 10 en 1 segundo
+
+Join -> El main espera por los hilos.
+Lock -> Los hilos esperan a que 1 termine
+Semaphore -> Lo mismo que Lock pero permitiendo la entrada a mas de 1
+(Explicar eso en mas detalle donde corresponda[Claude]).
+
+---
+Eventos. -> threading.Event() False/True
+
+Para que sirven estos eventos? 
+Ejemplo.Cada uno somos un hilo y todos podemos entrar en el aula pero el profe no quiere que entremos cuando el quiera. Se nos creo a todos para entrar pero el nos para, todos. Cuando la habitcion este limpia pasamos todos. 
+
+El evento sirver para decir que tosos los hilos pueden entrar a x lugar, pero solo cuando el evento principal termine.
+
+False => No entran -> Por defecto
+True => Entran
+
+En vez de ir a por la llave, se pregunta si se puede entrar. ¿Está en false o no?
+Si es 'True' entran todos, sin darle las llaves uno a uno.
+
+Para que pregunten, se usa -> evento.wait() // A partir de aqui los hilos no siguen si esta en false.
+
+evento.set() -> El main sigue con sus cosas y los hilos entran.
+
+Despues del set(), si queremos volver a hacer que esperen -> evento.clear() lo setea a false de nuevo y mas adelante vovlemos a hacer evento.wait()
+
+Es arriesgado porque no se garantiza el orden de ejecucion. Un hilo podria llegar al wait sin que el clear se haya ejecutado, entrando en donde no tenia que entrar.
+
+Ejercicio 10pingsEvento.py:
+Respuesta:
+```
+Dame una m: p
+Dame una m: e
+Dame una m: q
+Dame una m: y
+Dame una m: m
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+
+--- 8.8.8.8 ping statistics ---
+--- 8.8.8.8 ping statistics ---
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+rtt min/avg/max/mdev = 28.355/28.355/28.355/0.000 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.429/28.429/28.429/0.000 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
+
+--- 8.8.8.8 ping statistics ---
+
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+--- 8.8.8.8 ping statistics ---
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.429/28.429/28.429/0.000 ms
+--- 8.8.8.8 ping statistics ---
+1 packets transmitted, 1 received, 0% packet loss, time 0ms
+rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
+```
+
+***Fin de la clase***
+---
