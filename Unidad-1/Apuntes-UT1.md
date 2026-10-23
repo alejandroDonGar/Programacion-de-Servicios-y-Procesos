@@ -757,6 +757,314 @@ hilos.append(t)
 
 > ⏳ **Pendiente:** apuntar la salida real. Para ver el corte del daemon, reducir el `range` del principal (p. ej. 100 vueltas frente a 1000 del hilo daemon): las `Y` del daemon se quedarían a medias.
 
+## 7. Esperar y sincronizar hilos
+
+Hasta ahora los hilos iban "a su aire". En esta sección vemos cómo **esperar** a un hilo (`join`), cómo proteger una zona que solo puede tocar un hilo cada vez (`Lock`), cómo dejar pasar a **varios** a la vez (`Semaphore`) y cómo hacer que todos esperen a una señal (`Event`).
+
+### Para qué sirve todo esto: un servidor web
+
+Un servidor web (nginx, Apache…) es el ejemplo típico de programa con hilos:
+
+1. El **hilo principal** abre el **puerto TCP 80** y espera peticiones.
+2. Llega una petición (`GET /index.html`) dentro de un **paquete IP** que lleva la **IP de origen** (p. ej. `10.108.99.11`) y el **puerto de origen** (p. ej. `31425`) del cliente: así el servidor sabe a quién contestar.
+3. El principal crea (o reutiliza) un **hilo secundario** que prepara la respuesta y se la **envía al cliente**.
+4. Mientras tanto, el principal **vuelve a esperar** la siguiente petición.
+
+> ✏️ **Corrección:** en las notas ponía "datagrama IP". La unidad del nivel IP es el **paquete** (también llamado datagrama IP), pero HTTP va sobre **TCP**, así que la petición llega por una **conexión TCP**; "datagrama" a secas se usa sobre todo para UDP.
+
+Como varios hilos atienden peticiones a la vez y comparten la memoria del proceso, hace falta **sincronizarlos**.
+
+### `t.join()`: el principal espera a un hilo concreto
+
+`t.join()` **bloquea al hilo que lo llama** (normalmente el principal) hasta que el hilo `t` termina.
+
+```
+-MainThread-
+  t = threading.Thread(target=funcion)
+  t.start()
+  print("hola")
+  ...
+  t.join()        ← PARA aquí hasta que t termine
+  print("Secundario ha terminado")   ← siempre después de t
+-MainThread-
+```
+
+### Ejemplo 12: sin `join` el orden no está garantizado (`esperando.py`)
+
+```python
+import threading
+
+def hilo_secundario():
+    for i in range(1000):
+        print("Y", end="")      # 1000 letras 'Y'
+
+t = threading.Thread(target=hilo_secundario, daemon=False)
+t.start()
+
+print("X", end="")
+print("El hilo secundario ya terminó, ¡ADIÓS!")   # queremos que sea lo último
+```
+
+El mensaje final **miente**: el principal no espera a nadie, así que el "¡ADIÓS!" puede salir antes, en medio o después de las `Y`. Que el hilo sea no daemon solo garantiza que el **proceso** no termine antes que él, no que el principal lo espere en ese punto.
+
+### Ejemplo 13: con `join` (`esperandoTimeJoin.py`)
+
+```python
+import threading
+
+def hilo_secundario():
+    for i in range(1000):
+        print("Y", end="", flush=True)   # flush: cada letra sale en el momento
+
+t = threading.Thread(target=hilo_secundario, daemon=False)
+t.start()
+
+for i in range(10):                      # hilo principal
+    print("X", end="", flush=True)
+
+t.join()                                 # el principal espera a que acabe el secundario
+print("El hilo secundario ya terminó, ¡ADIÓS!")   # ahora SIEMPRE es lo último
+```
+
+- **`flush=True`:** `print` normalmente guarda el texto en un **búfer** y lo escribe de golpe. Con `flush` cada `print` se escribe al momento, así que las `X` y las `Y` se ven **intercaladas** (y se nota la concurrencia).
+- **`join()` y `daemon`:** `join()` obliga al principal a esperar **sea el hilo daemon o no**. `daemon` solo decide qué pasa si el proceso termina sin haber hecho `join`.
+
+> ⏳ **Pendiente:** apuntar la salida real de los ejemplos 12 y 13.
+
+### Ejemplo 14: condición de carrera (`realizado19.10.2026.py` y `realizadoConNombreHilos19.10.2026.py`)
+
+Dos hilos (el secundario y el principal) ejecutan la misma función, que solo debería hacer el trabajo **una vez**:
+
+```python
+import threading
+
+realizado = False
+
+def trabajo():
+    global realizado          # usamos la variable global (memoria del proceso), no una local de la pila
+    if not realizado:
+        realizado = True
+        print(f"Lo hice yo que soy {threading.current_thread().name}")
+    else:
+        print(f"Yo no pude que soy {threading.current_thread().name}")
+
+t = threading.Thread(target=trabajo, daemon=False)
+t.start()      # el secundario ejecuta trabajo()
+trabajo()      # y el principal también
+```
+
+| Caso | Qué pasa | Resultado |
+|---|---|---|
+| Normal | Un hilo comprueba `if not realizado`, pone `True` e imprime; el otro ya ve `True` | "Lo hice yo" **una vez** y "Yo no pude" la otra |
+| Cambio de contexto entre el `if` y la asignación | El sistema saca al hilo A justo después de comprobar `if not realizado`; entra B, también lo ve `False`, pone `True` e imprime; vuelve A **desde donde estaba** (ya pasó el `if`) e imprime también | "Lo hice yo" **dos veces** |
+
+Esto es una **condición de carrera**: el resultado depende de cuándo el sistema haga el cambio de contexto. El trozo `if not realizado: realizado = True` es una **región crítica**.
+
+> ✏️ **Corrección:** en el código pone `realizado=True  # Operacion entrada salida`. Asignar una variable **no** es una operación de entrada/salida: es escribir en memoria. La E/S es el `print` (escribir en pantalla), y es justo lo que más favorece que el sistema saque al hilo. Por eso, si se pone el `print` **antes** de `realizado = True`, el hueco entre comprobar y marcar es mucho más grande y es muy fácil que los dos impriman.
+
+> ⏳ **Pendiente:** apuntar la salida real (con y sin el `print` antes de la asignación).
+
+### Región crítica y `threading.Lock`
+
+**Región crítica** = trozo de código donde **solo puede estar un hilo a la vez** (normalmente porque lee y modifica datos compartidos).
+
+Un **`Lock`** (cerrojo) es como **una sola llave**:
+
+| Método | Qué hace |
+|---|---|
+| `lock.acquire()` | Pide la llave. Si la tiene otro hilo, **espera** hasta que la suelte |
+| `lock.release()` | Devuelve la llave para que entre el siguiente (cualquiera, no se elige cuál) |
+
+### Ejemplo 15: sumar con `Lock` (`cerrando.py`)
+
+```python
+import threading
+
+dato = 0
+hilos = []
+lock = threading.Lock()
+
+def suma():
+    global dato, lock
+    print(f"dato={dato} modificado por {threading.current_thread().name}")   # FUERA del lock
+    lock.acquire()      # entra solo uno
+    a = dato            # leer
+    a += 1              # modificar
+    dato = a            # escribir
+    lock.release()      # deja pasar al siguiente
+
+for i in range(3):
+    t = threading.Thread(target=suma)
+    t.start()
+    hilos.append(t)
+
+for i in hilos:
+    i.join()            # el principal espera a los 3
+print(f"El MT imprime {dato}")
+```
+
+Salidas reales (dos ejecuciones):
+
+```
+dato=0 modificado por Thread-1 (suma)
+dato=1 modificado por Thread-2 (suma)
+dato=2 modificado por Thread-3 (suma)
+El MT imprime 3
+```
+
+```
+dato=0 modificado por Thread-1 (suma)
+dato=1 modificado por Thread-2 (suma)
+dato=1 modificado por Thread-3 (suma)
+El MT imprime 3
+```
+
+**¿Por qué la segunda muestra `dato=1` dos veces y aun así el final es 3?** El `print` está **fuera** del lock: Thread-3 lee `dato` para imprimirlo antes de que Thread-2 haya terminado su suma. Lo que se **imprime** puede estar desfasado, pero la **suma** (leer → sumar → escribir) está dentro del lock y nunca se pisa, así que el resultado final siempre es 3.
+
+Sin el lock sí podría perderse una suma: dos hilos leen `a = dato` con el mismo valor, los dos suman 1 y los dos escriben lo mismo → el final sería 2.
+
+> ➕ **Ampliación:** lo habitual es escribir `with lock:` en lugar de `acquire()`/`release()`: suelta la llave automáticamente aunque haya una excepción dentro (si no, el lock se quedaría cogido y los demás hilos esperarían para siempre).
+>
+> ```python
+> with lock:
+>     dato += 1
+> ```
+
+### `join` frente a `Lock`
+
+| | `join()` | `Lock` |
+|---|---|---|
+| Quién espera | El hilo que llama (normalmente el **principal**) | Los **hilos** que quieren entrar en la región crítica |
+| A qué espera | A que **un hilo concreto termine** | A que **quien tenga la llave la suelte** |
+| ¿Se indica el hilo? | **Sí** (`t.join()`): el principal tiene que saber a quién espera | **No**: la llave es un objeto compartido; da igual quién la tenga, solo importa que esté libre |
+| Para qué | Ordenar el final (p. ej. imprimir el resultado cuando todos han acabado) | Que dos hilos no modifiquen a la vez el mismo dato |
+
+### `threading.Semaphore(n)`: dejar entrar a `n` hilos a la vez
+
+Un **semáforo** es como un lock con **`n` llaves**: entran hasta `n` hilos a la vez y el resto espera a que **salga cualquiera**. Usa los mismos métodos: `semaforo.acquire()` y `semaforo.release()` (o `with semaforo:`). Un `Semaphore(1)` se comporta como un `Lock`.
+
+**¿Por qué querrías `n` hilos dentro y no uno ni todos?** Para **limitar** el uso de un recurso que aguanta varios accesos, pero no infinitos:
+
+- Un servidor web que recibe 1000 peticiones de golpe (o un ataque que intenta tumbarlo): solo se atienden `n` a la vez y el resto espera.
+- Un **pool de conexiones** a una base de datos que solo admite 10 conexiones.
+- Limitar descargas o llamadas a una API a la vez para no saturar la red ni que te bloqueen.
+
+Podemos elegir **cuántos** hilos entran, pero **no cuáles**: pueden entrar 1-2, 3-4, 5-6… o 1-2, 3-9, 4-6…
+
+### Ejemplo 16: pings de dos en dos (`semaforo.py`)
+
+```python
+import threading, subprocess, time
+
+semaforo = threading.Semaphore(2)    # 2 llaves: entran 2 hilos a la vez
+
+def ping():
+    global semaforo
+    semaforo.acquire()
+    print(threading.current_thread().name, flush=True)
+    subprocess.run(["ping", "-c", "1", "8.8.8.8"])   # bloqueante: espera a que acabe el ping
+    time.sleep(1)
+    semaforo.release()
+
+for i in range(11):
+    t = threading.Thread(target=ping)
+    t.start()
+```
+
+Salida real (resumida): los hilos van **de dos en dos**: `Thread-1` y `Thread-2` hacen su ping, luego `Thread-3` y `Thread-4`, etc.
+
+```
+Thread-1 (ping)
+Thread-2 (ping)
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
+...
+Thread-3 (ping)
+Thread-4 (ping)
+...
+Thread-9 (ping)
+Thread-10 (ping)
+...
+```
+
+> ✏️ **Corrección:** el `range(11)` crea **11 hilos**, no 10 (la salida apuntada termina en `Thread-10`; falta `Thread-11`, que haría su ping solo al final). Cada pareja tarda algo más de 1 s (ping + `sleep(1)`), así que 11 hilos en 6 tandas tardan unos **6 s**, no 5.
+
+### Ejemplo 17: 10 pings a la vez sin control (`10pings.py`)
+
+```python
+import threading, subprocess
+
+def ping():
+    subprocess.run(["ping", "-c", "1", "8.8.8.8"])
+
+for i in range(10):
+    t = threading.Thread(target=ping)
+    t.start()
+```
+
+Sin semáforo los 10 hilos lanzan el ping **a la vez**: en la salida real salen las 10 líneas `PING 8.8.8.8 ...` seguidas y luego las respuestas mezcladas. Tarda alrededor de **1 s** en total en lugar de 10 s (uno detrás de otro). Es lo mismo que el ejemplo 7 con `fork`, pero con hilos.
+
+### `threading.Event()`: todos esperan a una señal
+
+Un **evento** es una bandera compartida que empieza en **`False`**. Los hilos no piden una llave uno a uno: **preguntan** si pueden pasar.
+
+| Método | Qué hace |
+|---|---|
+| `evento.wait()` | El hilo se para aquí mientras el evento esté a `False` |
+| `evento.set()` | Pone el evento a `True`: **todos** los hilos que esperaban pasan a la vez, y el que lo llama sigue con lo suyo |
+| `evento.clear()` | Lo vuelve a poner a `False`, para que los próximos `wait()` vuelvan a esperar |
+| `evento.is_set()` | Devuelve `True`/`False` sin esperar |
+
+**Ejemplo de clase:** cada alumno es un hilo y todos estamos listos para entrar al aula, pero el profe (el principal) no nos deja hasta que esté limpia. Cuando lo está (`set()`), entramos **todos** a la vez.
+
+> ⚠️ **Cuidado con `clear()`:** no se garantiza el orden de ejecución. Si el principal hace `set()` y después `clear()`, un hilo que llegue tarde al `wait()` puede encontrarse el evento todavía en `True` (o ya en `False`) y entrar cuando no tocaba (o quedarse esperando). El evento sirve para "abrir la puerta a todos", no para controlar uno a uno quién entra: para eso están `Lock` y `Semaphore`.
+
+### Ejemplo 18: los pings esperan a que escribamos una `m` (`10pingsEvento.py`)
+
+```python
+import threading, subprocess
+
+evento = threading.Event()     # False por defecto
+
+def ping():
+    global evento
+    evento.wait()              # los hilos esperan aquí
+    subprocess.run(["ping", "-c", "1", "8.8.8.8"])
+
+for i in range(10):
+    t = threading.Thread(target=ping)
+    t.start()
+
+letra = ""
+while letra != "m":            # el principal pide letras hasta que escribamos una 'm'
+    letra = input("Dame una m: ")
+evento.set()                   # ahora los 10 hilos pasan a la vez
+```
+
+Salida real (resumida): mientras no se escribe la `m` no sale ningún ping; al escribirla salen los 10 `PING` seguidos y las respuestas mezcladas, como en el ejemplo 17.
+
+```
+Dame una m: p
+Dame una m: e
+Dame una m: q
+Dame una m: y
+Dame una m: m
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
+...
+```
+
+### Resumen: `join`, `Lock`, `Semaphore` y `Event`
+
+| Herramienta | Quién espera | A qué espera | Cuántos pasan |
+|---|---|---|---|
+| `t.join()` | El principal (el que llama) | A que termine el hilo `t` | — |
+| `Lock()` | Los hilos | A que se suelte la única llave | 1 |
+| `Semaphore(n)` | Los hilos | A que quede libre alguna de las `n` llaves | hasta `n` |
+| `Event()` | Los hilos (`wait()`) | A que alguien haga `set()` | Todos a la vez |
+
 ---
 
 ## Resumen rápido
@@ -779,313 +1087,6 @@ hilos.append(t)
 - **PCB con hilos:** PID, PPID, usuario, privilegios y memoria son del proceso · cada hilo tiene su **estado** y su **foto de la CPU** (registros, PC, SP, pila).
 - No hay hilo sin proceso · el proceso **espera a que acaben todos sus hilos** aunque el principal haya terminado · los hilos se suelen guardar en una **lista** · `threading.current_thread().name` y `t.name` dan el nombre del hilo.
 - **`daemon`** (por defecto `False`): el principal espera a los hilos **no daemon**; con `daemon=True` el hilo se corta cuando termina el proceso · `Thread(target=f, daemon=True)`.
-
----
-temario 19.10.2026
-
-Software WEB server -> abriendo el puerto TCP/80
-pedido -> GET/index.html
-datagrama ip
-    ip.origien -> 10.108.99.11
-    p.origin -> 31425
-    hilo secundario envia los datos al cliente
-
-hilo principal vuelve a esperar a la siguiente peticion
-
-ejercicios realizado y realizadoConNombreHilos
-
-t=threading.Thread(target=funcion)
-t.start
--mainThread-
-.   print("hola")
-.
-.
-.
-.   <PARAR> para que el hilo secundario termine -> se hace t.join()
-.   print("Secundario ha terminado")
--mainThread-
-
-**Buscar errores en las explicaciones y corregir para la implementacion en el README(claude)**
-
----- 
-temario 22-10-2026
-
-ejercicio 'cerrando.py' sobre lock (Explicar que es y la diferencia entre lock y join, ver porque en uno no hace falta especificar el hilo y en el otro sí)
-
-"Regios critca" = Zona donde solo puede entrar un unico hilo.
-retultado del ejercicio:
-```
-dato=0 modificado por Thread-1 (suma)
-dato=1 modificado por Thread-2 (suma)
-dato=2 modificado por Thread-3 (suma)
-El MT imprime 3
-```
-puede ocurrir esto:
-
-```
-dato=0 modificado por Thread-1 (suma)
-dato=1 modificado por Thread-2 (suma)
-dato=1 modificado por Thread-3 (suma)
-El MT imprime 3
-```
-
-Esplicar porque ocurre esto.  El traerse datos y mostrar diferentes pero ver el mismo resultado final.
-
-Para controlar la region critica tambien esta el "semáforo" = threading.Semaphore(i). Va ha funcionar como el metodos 'acquire' y el 'release', Semaphore.acquire(), Semaphore.release(). 'i' indica cuantas llaves hay. En vez de ir uno por uno entrar 4, los que sean, y los demas esperan a que cualquiera salga.
-
-¿Por que querrias tener 4 o x hilos dentro? -> Explicar
-
-por ejemplo si te intenta explotar la pagina con muchas peticiones, puedes bloquear y limitar. Aunque hayna 1000, solo entran x
-
-(Buscar demas explicaciones o usos)
-
----
-
-Ejercicio semaforo:
-respuesta:
-```
-Thread-1 (ping)
-Thread-2 (ping)
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.6 ms
-
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 27.629/27.629/27.629/0.000 ms
-rtt min/avg/max/mdev = 27.629/27.629/27.629/0.000 ms
-Thread-3 (ping)
-Thread-4 (ping)
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.7 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.7 ms
-
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 27.739/27.739/27.739/0.000 ms
-rtt min/avg/max/mdev = 27.740/27.740/27.740/0.000 ms
-Thread-5 (ping)
-Thread-6 (ping)
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.4 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=27.4 ms
-
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 27.416/27.416/27.416/0.000 ms
-rtt min/avg/max/mdev = 27.415/27.415/27.415/0.000 ms
-Thread-7 (ping)
-Thread-8 (ping)
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.2 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.2 ms
-
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.199/28.199/28.199/0.000 ms
-rtt min/avg/max/mdev = 28.199/28.199/28.199/0.000 ms
-Thread-9 (ping)
-Thread-10 (ping)
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.5 ms
-
---- 8.8.8.8 ping statistics ---
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.5 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-
-rtt min/avg/max/mdev = 28.479/28.479/28.479/0.000 ms
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.479/28.479/28.479/0.000 ms
-
-```
-Aqui van los diez por cada dos, ejecutandose 10 en 5 segundo
-
-Podemos ejegir cuantos hilos entran pero no cuales. Podriamos tener el 1-2, 3-4, 5-6 etc... o 1-2, 3-9, 4-6 etc...
-
----
-
-Ejercicio 10pings:
-respuesta:
-```
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
---- 8.8.8.8 ping statistics ---
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
---- 8.8.8.8 ping statistics ---
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.8 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.764/28.764/28.764/0.000 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.652/28.652/28.652/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.8 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.764/28.764/28.764/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.7 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-rtt min/avg/max/mdev = 28.653/28.653/28.653/0.000 ms
-
-```
-
-Aqui van los diez a la vez, ejecutandose 10 en 1 segundo
-
-Join -> El main espera por los hilos.
-Lock -> Los hilos esperan a que 1 termine
-Semaphore -> Lo mismo que Lock pero permitiendo la entrada a mas de 1
-(Explicar eso en mas detalle donde corresponda[Claude]).
-
----
-Eventos. -> threading.Event() False/True
-
-Para que sirven estos eventos? 
-Ejemplo.Cada uno somos un hilo y todos podemos entrar en el aula pero el profe no quiere que entremos cuando el quiera. Se nos creo a todos para entrar pero el nos para, todos. Cuando la habitcion este limpia pasamos todos. 
-
-El evento sirver para decir que tosos los hilos pueden entrar a x lugar, pero solo cuando el evento principal termine.
-
-False => No entran -> Por defecto
-True => Entran
-
-En vez de ir a por la llave, se pregunta si se puede entrar. ¿Está en false o no?
-Si es 'True' entran todos, sin darle las llaves uno a uno.
-
-Para que pregunten, se usa -> evento.wait() // A partir de aqui los hilos no siguen si esta en false.
-
-evento.set() -> El main sigue con sus cosas y los hilos entran.
-
-Despues del set(), si queremos volver a hacer que esperen -> evento.clear() lo setea a false de nuevo y mas adelante vovlemos a hacer evento.wait()
-
-Es arriesgado porque no se garantiza el orden de ejecucion. Un hilo podria llegar al wait sin que el clear se haya ejecutado, entrando en donde no tenia que entrar.
-
-Ejercicio 10pingsEvento.py:
-Respuesta:
-```
-Dame una m: p
-Dame una m: e
-Dame una m: q
-Dame una m: y
-Dame una m: m
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
-
---- 8.8.8.8 ping statistics ---
---- 8.8.8.8 ping statistics ---
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-rtt min/avg/max/mdev = 28.355/28.355/28.355/0.000 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.429/28.429/28.429/0.000 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
-64 bytes from 8.8.8.8: icmp_seq=1 ttl=255 time=28.4 ms
-
---- 8.8.8.8 ping statistics ---
-
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
---- 8.8.8.8 ping statistics ---
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.429/28.429/28.429/0.000 ms
---- 8.8.8.8 ping statistics ---
-1 packets transmitted, 1 received, 0% packet loss, time 0ms
-rtt min/avg/max/mdev = 28.356/28.356/28.356/0.000 ms
-```
-
-***Fin de la clase***
----
+- `t.join()` → el principal **espera a un hilo concreto** (sea daemon o no) · `print(..., flush=True)` escribe al momento, sin búfer.
+- **Condición de carrera:** el resultado depende de cuándo se haga el cambio de contexto · **región crítica** = código donde solo debe estar un hilo a la vez.
+- `Lock()` → **una llave**: `acquire()` / `release()` (o `with lock:`) · `Semaphore(n)` → **n llaves**, entran hasta n (se elige cuántos, no cuáles) · `Event()` → bandera a `False`: `wait()` espera, `set()` deja pasar a **todos**, `clear()` vuelve a cerrar.
