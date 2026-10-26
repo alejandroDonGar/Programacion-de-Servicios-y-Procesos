@@ -1065,6 +1065,65 @@ PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
 | `Semaphore(n)` | Los hilos | A que quede libre alguna de las `n` llaves | hasta `n` |
 | `Event()` | Los hilos (`wait()`) | A que alguien haga `set()` | Todos a la vez |
 
+### `queue.Queue`: una cola segura para pasar datos entre hilos (26/10)
+
+Hasta ahora los hilos compartían **variables globales** y había que protegerlas a mano con `Lock`. Una **cola** (`queue.Queue`, de la librería estándar) es una estructura **FIFO** (*First In, First Out*: el primero que entra es el primero que sale, como la cola del supermercado) que **ya trae su propio `Lock` por dentro**: varios hilos pueden meter y sacar a la vez sin condición de carrera.
+
+| Método | Qué hace |
+|---|---|
+| `q = queue.Queue(n)` | Crea una cola de como mucho `n` elementos (`Queue()` o `n = 0` → sin límite) |
+| `q.put(x)` | Mete `x` al final. Si la cola está **llena**, el hilo **se bloquea** hasta que haya hueco |
+| `q.get()` | Saca y devuelve el primero. Si la cola está **vacía**, el hilo **se bloquea** hasta que llegue algo |
+| `q.qsize()` / `q.empty()` / `q.full()` | Consultan el estado (solo orientativo: otro hilo puede cambiarlo justo después) |
+
+Es la pieza típica del problema **productor-consumidor**: unos hilos *producen* datos (`put`) y otros los *consumen* (`get`), y la cola hace de almacén intermedio. En el servidor web de la sección 7 sería: el principal mete las peticiones que llegan y los hilos trabajadores las van sacando.
+
+### Ejemplo 19: primera cola (`queueQueue.py`)
+
+```python
+import threading, queue, time
+
+q = queue.Queue(10)                  # cola de como mucho 10 elementos
+semaforo = threading.Semaphore(10)   # 10 llaves (preparado para el productor-consumidor)
+
+# Productor: mete su nombre en la cola sin parar (se bloquea si no hay llave libre)
+def productor():
+    global q, semaforo
+    while True:
+        semaforo.acquire()
+        q.put(threading.current_thread().name)
+
+# Consumidor: saca de la cola, devuelve una llave y descansa 1 s
+def consumidor():
+    global q, semaforo
+    while True:
+        print(q.get())
+        semaforo.release()
+        time.sleep(1)
+
+# Lo que se ejecuta de verdad: el principal mete 0..9 y los vuelve a sacar
+for i in range(10):
+    q.put(i)
+
+for i in range(10):
+    print(q.get())
+```
+
+- Las funciones `productor` y `consumidor` están **definidas pero no se lanzan** (no hay ningún `Thread`): de momento solo trabaja el hilo principal.
+- Como la cola es FIFO, los números deberían salir **en el mismo orden en que entraron** (0, 1, 2… 9). Salida real: *pendiente de ejecutar y pegar aquí*.
+- Si se hiciera un `put` número 11 sin sacar nada, el principal **se quedaría bloqueado para siempre** (la cola tiene tamaño 10 y no hay nadie que saque).
+
+> ✏️ **Corrección:** no llames al archivo `queue.py`: Python importaría **tu archivo** en lugar del módulo `queue` de la librería estándar y `queue.Queue` fallaría. (En la carpeta quedó un `__pycache__/queue.cpython-313.pyc` de cuando se llamaba así; el nombre `queueQueue.py` ya está bien.)
+
+> ➕ **Ampliación:** `global q, semaforo` no hace falta, porque las funciones solo **usan** esas variables, no les asignan un valor nuevo (`global` solo es necesario para hacer `q = ...` dentro de la función). Y el semáforo de 10 es redundante con `Queue(10)`: la propia cola ya bloquea el `put` cuando está llena y el `get` cuando está vacía. Para ver el productor-consumidor funcionando bastaría con lanzar los dos hilos:
+>
+> ```python
+> threading.Thread(target=productor, name="Productor").start()
+> threading.Thread(target=consumidor).start()
+> ```
+>
+> El consumidor imprimiría `Productor` una vez por segundo y el productor estaría casi siempre bloqueado esperando hueco. (Sin probar en clase todavía.)
+
 ---
 
 ## Resumen rápido
@@ -1090,11 +1149,4 @@ PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
 - `t.join()` → el principal **espera a un hilo concreto** (sea daemon o no) · `print(..., flush=True)` escribe al momento, sin búfer.
 - **Condición de carrera:** el resultado depende de cuándo se haga el cambio de contexto · **región crítica** = código donde solo debe estar un hilo a la vez.
 - `Lock()` → **una llave**: `acquire()` / `release()` (o `with lock:`) · `Semaphore(n)` → **n llaves**, entran hasta n (se elige cuántos, no cuáles) · `Event()` → bandera a `False`: `wait()` espera, `set()` deja pasar a **todos**, `clear()` vuelve a cerrar.
-
----
-
-Temario 26.10.2026
-
-queue -Que es¿?
-
-ejercicio queueQueue.py
+- `queue.Queue(n)` → cola **FIFO** segura entre hilos (lleva su propio `Lock`) · `put` se bloquea si está llena, `get` si está vacía · base del **productor-consumidor** · no llamar al archivo `queue.py`.
