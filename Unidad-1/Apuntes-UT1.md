@@ -1090,3 +1090,11 @@ PING 8.8.8.8 (8.8.8.8) 56(84) bytes of data.
 - `t.join()` → el principal **espera a un hilo concreto** (sea daemon o no) · `print(..., flush=True)` escribe al momento, sin búfer.
 - **Condición de carrera:** el resultado depende de cuándo se haga el cambio de contexto · **región crítica** = código donde solo debe estar un hilo a la vez.
 - `Lock()` → **una llave**: `acquire()` / `release()` (o `with lock:`) · `Semaphore(n)` → **n llaves**, entran hasta n (se elige cuántos, no cuáles) · `Event()` → bandera a `False`: `wait()` espera, `set()` deja pasar a **todos**, `clear()` vuelve a cerrar.
+
+---
+
+Temario 26.10.2026
+
+queue -Que es¿?
+
+ejercicio queueQueue.py
