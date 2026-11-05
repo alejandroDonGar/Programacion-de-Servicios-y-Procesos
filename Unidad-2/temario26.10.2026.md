@@ -2,4 +2,11 @@
 
 ---
 
+5.11.2026
+socker de conexion
+[src_ip,src_port,dst_ip,dst_port]
 
+socket de escucha
+[src_ip,src_port]
+
+servidor1.py
