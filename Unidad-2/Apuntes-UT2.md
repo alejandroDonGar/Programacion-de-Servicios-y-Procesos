@@ -1,6 +1,6 @@
 # UT2 · Comunicación en red: sockets
 
-Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11 y el 09/11/2026.
+Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11, el 09/11 y el 10/11/2026.
 
 > 📚 Libro de referencia: *Programación de Servicios y Procesos en Python*. Cuando el profesor suba el temario de la UT2 al Campus, se completan estos apuntes con él.
 
@@ -226,6 +226,139 @@ tcp     LISTEN   0        200            127.0.0.1:5432           0.0.0.0:*
 
 ---
 
+## 8. Aceptar una conexión: `accept()`
+
+### Qué pasa cuando llega un cliente
+
+Repaso de la clase del 10/11: cada paquete lleva **IP origen, IP destino, puerto origen, puerto destino y los datos** (*payload*).
+
+> ✏️ **Corrección:** en las notas aparece «el cliente, cuando envía un datagrama, su IP src no está definida; usa el que esté libre». Lo que no fija el cliente es el **puerto** de origen: el sistema operativo le asigna uno **efímero** libre (en clase salió el **48203**). La IP de origen es la de la interfaz por la que sale el paquete. En cambio, el servidor **sí tiene que fijar** su puerto con `bind()`, porque el cliente tiene que saber a dónde llamar.
+
+Cuando el paquete llega al servidor, el sistema operativo ve que hay alguien escuchando en ese puerto, pero **no le pasa los datos directamente al programa**: completa el *handshake*, guarda la conexión en la **cola** del socket de escucha y los datos que van llegando en un **búfer del núcleo**. El programa los va **pidiendo** cuando quiere (`accept()`, `recv()`).
+
+### Ejemplo 2: aceptar un cliente (`servidorAccept.py`)
+
+```python
+import socket
+
+servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+servidor.bind(("", 4444))
+servidor.listen()
+
+# Se bloquea aquí hasta que llegue un cliente
+socket_cliente, addr = servidor.accept()
+
+print(f"IP_Cliente= {addr[0]} Puerto_Cliente= {addr[1]} Protocolo= TCP")
+a = input("aquí esperando")
+```
+
+| Línea | Qué hace |
+|---|---|
+| `servidor.accept()` | Saca de la cola la primera conexión ya establecida. Si la cola está vacía, **el programa se queda bloqueado** en esta línea (por eso el `input()` no se ejecuta hasta que alguien conecta) |
+| `socket_cliente` | Un socket **nuevo y distinto**: el **socket de conexión** con ese cliente (apartado 4). Por él se reciben y envían los datos |
+| `addr` | Tupla `(ip, puerto)` **del cliente**: `addr[0]` es su IP y `addr[1]` su puerto efímero |
+
+Hay por tanto **dos sockets**:
+
+| Socket | Para qué sirve |
+|---|---|
+| `servidor` (escucha) | Solo **recoge peticiones de conexión** y las deja en la cola. Nunca lleva datos |
+| `socket_cliente` (conexión) | Lleva los **datos** de un cliente concreto. El SO le asocia las 4 direcciones y el búfer donde están los datos recibidos |
+
+> ✏️ **Corrección (código del repo):** en `servidorAccept.py` y `servidorAcceptRespuesta.py` la variable se llama `addre` en el `accept()` pero luego se usa `addr[0]`: al conectar un cliente salta `NameError: name 'addr' is not defined`. Hay que usar el mismo nombre en las dos líneas (aquí, `addr`). En `servidorAccept.py` sobra además una `}` al final del `print` (saldría `TCP}`).
+
+**Prueba en clase:** el profesor lanzó el servidor y un alumno conectó desde su PC con `nc <ip_del_profesor> 4444`. En la terminal del profesor salió la IP del alumno y el puerto **48203** (el efímero que eligió su sistema). Un segundo alumno conectó también: su `nc` **conectó** (el SO hace el *handshake* y lo deja en la cola), pero el programa ya no lo atendía porque solo hay **un** `accept()`.
+
+---
+
+## 9. Recibir y responder: `recv()`, `sendall()` y la codificación
+
+### Ejemplo 3: leer el mensaje y contestar (`servidorAcceptRespuesta.py`)
+
+```python
+import socket
+
+servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+servidor.bind(("", 4444))
+servidor.listen()
+
+socket_cliente, addr = servidor.accept()
+print(f"IP_Cliente= {addr[0]} Puerto_Cliente= {addr[1]} Protocolo= TCP")
+
+datos = socket_cliente.recv(1024)          # bloqueante: espera a que el cliente envíe algo
+print(datos.decode("utf-8"))               # bytes -> texto
+socket_cliente.sendall("Mensaje recibido".encode("utf-8"))  # texto -> bytes
+socket_cliente.close()                     # cierra la conexión con ESTE cliente
+
+a = input("aquí esperando")
+
+socket_cliente, addr = servidor.accept()   # segundo cliente
+print(f"IP_Cliente= {addr[0]} Puerto_Cliente= {addr[1]} Protocolo= TCP")
+```
+
+| Llamada | Qué hace |
+|---|---|
+| `recv(1024)` | Pide al SO **hasta** 1024 octetos del búfer de esa conexión. **Bloquea** si aún no ha llegado nada. Devuelve `bytes`; si devuelve `b""`, el cliente ha cerrado |
+| `decode("utf-8")` | Convierte los `bytes` recibidos en `str` |
+| `encode("utf-8")` | Convierte un `str` en `bytes`: por la red solo viajan octetos |
+| `sendall(...)` | Envía **todos** los octetos (a diferencia de `send()`, que puede enviar solo una parte y devuelve cuántos) |
+| `close()` | Cierra el socket de conexión: el `nc` del alumno termina y le devuelve la terminal. El socket de escucha sigue abierto |
+
+En clase: el alumno escribe en su `nc`, el texto aparece en la terminal del profesor y al alumno le llega «Mensaje recibido». Después se repite con el segundo alumno.
+
+> ➕ **Ampliación:** TCP es un **flujo de octetos**, no de mensajes. Un `recv(1024)` puede traer medio mensaje o dos juntos; en un protocolo real se marca dónde acaba cada mensaje (un salto de línea, la longitud al principio…).
+
+### ASCII y UTF-8
+
+| Caracteres | Octetos en UTF-8 | Ejemplo |
+|---|---|---|
+| ASCII (letras inglesas, números, signos básicos) | 1 | `a` |
+| Latinos con tilde, `ñ`, griego, cirílico… | 2 | `ñ` |
+| Resto del plano básico (`€`, chino, japonés…) | 3 | `€` |
+| Emojis y otros | 4 | `😀` |
+
+UTF-8 es compatible con ASCII (un texto solo con caracteres ASCII ocupa lo mismo en los dos). Lo importante es que **los dos lados usen la misma codificación**: si se codifica en UTF-8 y se decodifica con otra, las tildes y la `ñ` salen mal.
+
+> ✏️ **Corrección:** en el comentario del código pone `.decode('utf-9')`: no existe, es `utf-8`.
+
+### «Address already in use» al relanzar el servidor
+
+Si se para el servidor y se vuelve a lanzar enseguida, `bind()` puede fallar con `OSError: [Errno 98] Address already in use`. Las conexiones cerradas quedan un rato en estado **`TIME_WAIT`** (hasta un par de minutos) y por defecto el núcleo no deja reutilizar ese puerto. Es lo que se buscó en clase cómo desactivar; se hace **antes del `bind()`** con:
+
+```python
+servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+```
+
+> 🧪 **Prueba local (Windows, Python, 10/11/2026)** con la versión corregida, un bucle de 2 `accept()` y un cliente Python en `127.0.0.1`: los dos clientes recibieron «Mensaje recibido» y el servidor mostró los puertos efímeros 54169 y 54170 (consecutivos: el SO los va asignando). ⏳ Pendiente repetirlo en Linux con `nc` y pegar aquí la salida real.
+
+---
+
+## 10. El problema: un cliente cada vez
+
+Con este servidor, **si el primer cliente no termina, el segundo espera** todo lo que haga falta: el programa está bloqueado en el `recv()` del primero y no vuelve al `accept()`.
+
+Primera mejora, un bucle para no repetir el `accept()`:
+
+```python
+while True:
+    socket_cliente, addr = servidor.accept()   # el hilo principal se bloquea aquí
+    atender(socket_cliente, addr)              # mientras atiende a uno, nadie más entra
+```
+
+La solución es usar lo de la **UT1**: el hilo principal solo hace `accept()` y **entrega cada socket de conexión a un hilo nuevo**, que lo atiende mientras el principal vuelve a esperar al siguiente. Con un `threading.Semaphore(n)` se limita cuántos clientes se atienden a la vez.
+
+```python
+import threading
+
+while True:
+    socket_cliente, addr = servidor.accept()
+    threading.Thread(target=atender, args=(socket_cliente, addr)).start()
+```
+
+> Según el profesor, el servidor concurrente se verá en detalle en la **UT4**. Por eso se explica primero TCP: está pensado para conexiones que se atienden por separado (un socket por cliente); UDP no tiene conexiones.
+
+---
+
 ## Resumen rápido
 
 - **Cliente-servidor:** el servidor escucha en un puerto conocido y el cliente **inicia** la comunicación.
@@ -235,51 +368,8 @@ tcp     LISTEN   0        200            127.0.0.1:5432           0.0.0.0:*
 - **Socket de escucha** = `[ip, puerto]`. **Socket de conexión** = `[ip_origen, puerto_origen, ip_destino, puerto_destino]`. Muchas conexiones pueden compartir el puerto del servidor.
 - **Puertos bien conocidos** 0-1023 (solo `root` en Linux): 22 SSH, 53 DNS, 80 HTTP, 443 HTTPS… Sin puerto en la URL, el navegador usa el del protocolo.
 - **`tcpdump`:** `[S]` SYN, `[S.]` SYN-ACK, `[.]` ACK, `[P.]` datos, `[F.]` cierre, `[R]` rechazo (nadie escucha). `win` = ventana, `TS val/ecr` = marcas de tiempo, `nop` = relleno.
-- `socket.socket(AF_INET, SOCK_STREAM)` → `bind(("", 4444))` (`""` = todas las IP) → `listen()` → (pendiente) `accept()`. Se comprueba con `ss -putnl`.
-
-
----
-temario dia 10.11.2026 a explicar e implementar al .md
-
-forma de un datagrama (lo que ya tenia ayer de src ip, dst ip, src port, dst port, datos(payload))
-
-el cliente, cuando envia un datagrama, su ip src no esta definido. Usa el que este libre. En servidor si hay que definir el puerto donde se escucha.
-
-cuano el datagrama llega al servidor, dice, hay alguien en x puerto. Los datos no los envia ahi, sino que los emte en una arquitectura y el programa los va pidiendo. 
-
-**servidor.accept()**
-
-*socket_cliente,addre=servidor.accept()* <-- Linea que irian despues del servidor.listen() en servidor.py (explicar a fondo)
-
-ahí vienen las posiciones de memoria y le entrega a la aplicacion en donde estan las posiciones. Esto es un socket, otro distinto. El primero es un socket que escucha, pero este es un socket que si ve los datos y los entrega. El primero solo recibe y el segundo los entrega.
-
-si no llegar ningun cliente, el socket nuevo se queda esperando, por lo quela sigueinte linea de a=input("aquí esperando") no se llegará a ejecutar. Para que el socket lidee con el cliente, el OS le da la ip y puerto, y un puntero hacia ese cliente. addr guarda la ip y puerto del cliente. 
-
->Ejercicio nuevo servidorAccept.py 
-
-
-
-el profesor ejecuto el programa.
-
-Un alumno se conector desde suy pc al del profesor con 
-nc ip 4444
-
-le imprime el print con los datos del addr porque necesitaba una respuesta para dejar de esperar. La salida en la terminal del profesor muestra el puerto libre que encontro nuestro pc para poder enviar la info. era el 48203 en este caso. 
-
-Otro alumno intento conectarse y se demostro la cola de la que hablabamos. se ejecuto el primer accept y es segundo se quedo esperando porque solo hay 1. 
-
->Ejercicio nuevo servidorAcceptRespuesta
-
-ahora, el profe abre, el primer alumno se conecta, este escribe y sale en la terminal del profe y al alumno en su terminal le sale "Mensaje recibido". Lo mismo con el segundo. 
-
-lo malo de esto es que si el primeor no temina, el segundo teien que esperar, sea el tiempo que sea. 
-
-para esto se usaran tecnicas de concurrencia de la unidad 1 y demas
-el tcp esta pensado para la concurrencia, udp no, por eso se explica primero el tcp.
-La idea: se abre el puerto (4444), en accept se acepta, pero para no tener que duplicar los accept mejor seria usar un while. Si no hay cliente, el main thread se queda bloqueado. Lo mejor seria darle el socket a un nuevo hilo. EL hilo principal llega al accept y este lo derega a uno secundario, asi con cada uno, separando las tareas desde un solo sitio a varios a la vez. Pudiendo tamien limitar el numero de hilos con semaphores. **(Esto es de la ut4)**
-
-ascii y utf-8. Se usuara el que sea depeneidneo de los caracteres del mensaje. caracteres anglosajones miden 1 octeto por letra, los demas pueden llegara a 2, 3 o 4 octetso
-
-nota, si se temina le proceso, por defecto el kernel no te permite inmediatamente abrir otro en el mismo. Fue algo que se menciono en clase y buscamos como descativarlo. 
-
-**(Probar en local con maquinas virtuales o entornos en terminal si las salidas de los ejercicios se justifican a los ejercicios y si no arreglarlo. Explicando cada parde del codigo y su logica de funcionamiento)**
+- `socket.socket(AF_INET, SOCK_STREAM)` → `bind(("", 4444))` (`""` = todas las IP) → `listen()` → `accept()`. Se comprueba con `ss -putnl`.
+- `accept()` **bloquea** hasta que llega un cliente y devuelve `(socket_cliente, addr)`: un **socket de conexión nuevo** y la IP y el puerto efímero del cliente. El de escucha solo recoge conexiones.
+- `recv(1024)` (bloqueante, devuelve `bytes`) + `decode("utf-8")`; `sendall(texto.encode("utf-8"))`; `close()` libera al cliente. UTF-8: 1 octeto en ASCII, 2-4 en el resto.
+- `SO_REUSEADDR` antes de `bind()` evita «Address already in use» al relanzar.
+- Con un solo hilo se atiende **un cliente cada vez**; la solución es un hilo por cliente tras cada `accept()` (UT4).
