@@ -236,3 +236,50 @@ tcp     LISTEN   0        200            127.0.0.1:5432           0.0.0.0:*
 - **Puertos bien conocidos** 0-1023 (solo `root` en Linux): 22 SSH, 53 DNS, 80 HTTP, 443 HTTPS… Sin puerto en la URL, el navegador usa el del protocolo.
 - **`tcpdump`:** `[S]` SYN, `[S.]` SYN-ACK, `[.]` ACK, `[P.]` datos, `[F.]` cierre, `[R]` rechazo (nadie escucha). `win` = ventana, `TS val/ecr` = marcas de tiempo, `nop` = relleno.
 - `socket.socket(AF_INET, SOCK_STREAM)` → `bind(("", 4444))` (`""` = todas las IP) → `listen()` → (pendiente) `accept()`. Se comprueba con `ss -putnl`.
+
+
+---
+temario dia 10.11.2026 a explicar e implementar al .md
+
+forma de un datagrama (lo que ya tenia ayer de src ip, dst ip, src port, dst port, datos(payload))
+
+el cliente, cuando envia un datagrama, su ip src no esta definido. Usa el que este libre. En servidor si hay que definir el puerto donde se escucha.
+
+cuano el datagrama llega al servidor, dice, hay alguien en x puerto. Los datos no los envia ahi, sino que los emte en una arquitectura y el programa los va pidiendo. 
+
+**servidor.accept()**
+
+*socket_cliente,addre=servidor.accept()* <-- Linea que irian despues del servidor.listen() en servidor.py (explicar a fondo)
+
+ahí vienen las posiciones de memoria y le entrega a la aplicacion en donde estan las posiciones. Esto es un socket, otro distinto. El primero es un socket que escucha, pero este es un socket que si ve los datos y los entrega. El primero solo recibe y el segundo los entrega.
+
+si no llegar ningun cliente, el socket nuevo se queda esperando, por lo quela sigueinte linea de a=input("aquí esperando") no se llegará a ejecutar. Para que el socket lidee con el cliente, el OS le da la ip y puerto, y un puntero hacia ese cliente. addr guarda la ip y puerto del cliente. 
+
+>Ejercicio nuevo servidorAccept.py 
+
+
+
+el profesor ejecuto el programa.
+
+Un alumno se conector desde suy pc al del profesor con 
+nc ip 4444
+
+le imprime el print con los datos del addr porque necesitaba una respuesta para dejar de esperar. La salida en la terminal del profesor muestra el puerto libre que encontro nuestro pc para poder enviar la info. era el 48203 en este caso. 
+
+Otro alumno intento conectarse y se demostro la cola de la que hablabamos. se ejecuto el primer accept y es segundo se quedo esperando porque solo hay 1. 
+
+>Ejercicio nuevo servidorAcceptRespuesta
+
+ahora, el profe abre, el primer alumno se conecta, este escribe y sale en la terminal del profe y al alumno en su terminal le sale "Mensaje recibido". Lo mismo con el segundo. 
+
+lo malo de esto es que si el primeor no temina, el segundo teien que esperar, sea el tiempo que sea. 
+
+para esto se usaran tecnicas de concurrencia de la unidad 1 y demas
+el tcp esta pensado para la concurrencia, udp no, por eso se explica primero el tcp.
+La idea: se abre el puerto (4444), en accept se acepta, pero para no tener que duplicar los accept mejor seria usar un while. Si no hay cliente, el main thread se queda bloqueado. Lo mejor seria darle el socket a un nuevo hilo. EL hilo principal llega al accept y este lo derega a uno secundario, asi con cada uno, separando las tareas desde un solo sitio a varios a la vez. Pudiendo tamien limitar el numero de hilos con semaphores. **(Esto es de la ut4)**
+
+ascii y utf-8. Se usuara el que sea depeneidneo de los caracteres del mensaje. caracteres anglosajones miden 1 octeto por letra, los demas pueden llegara a 2, 3 o 4 octetso
+
+nota, si se temina le proceso, por defecto el kernel no te permite inmediatamente abrir otro en el mismo. Fue algo que se menciono en clase y buscamos como descativarlo. 
+
+**(Probar en local con maquinas virtuales o entornos en terminal si las salidas de los ejercicios se justifican a los ejercicios y si no arreglarlo. Explicando cada parde del codigo y su logica de funcionamiento)**
