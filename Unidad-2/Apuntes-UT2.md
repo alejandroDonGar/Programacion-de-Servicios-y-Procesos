@@ -1,6 +1,6 @@
 # UT2 · Comunicación en red: sockets
 
-Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11, el 09/11 y el 10/11/2026.
+Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11, el 09/11, el 10/11 y el 17/11/2026.
 
 > 📚 Libro de referencia: *Programación de Servicios y Procesos en Python*. Cuando el profesor suba el temario de la UT2 al Campus, se completan estos apuntes con él.
 
@@ -359,6 +359,66 @@ while True:
 
 ---
 
+## 11. El otro lado: el cliente en Python (17/11)
+
+Hasta ahora el cliente era `nc`. Ahora se programa también en Python. El cliente **no hace `bind()` ni `listen()`**: no espera a nadie, es él quien **inicia** la conexión (apartado 1). Solo necesita saber **a qué IP y a qué puerto** llamar.
+
+| Servidor | Cliente |
+|---|---|
+| `socket()` | `socket()` |
+| `bind(("", 4444))` + `listen()` | — |
+| `accept()` → socket de conexión nuevo | `connect((ip, puerto))` → el mismo socket pasa a estar conectado |
+| `recv()` / `sendall()` sobre `socket_cliente` | `sendall()` / `recv()` sobre `cliente` |
+| `socket_cliente.close()` | `cliente.close()` |
+
+### Ejemplo 4: conectar con un servidor fijo (`servidorCliente.py`)
+
+```python
+import socket
+
+cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)   # IPv4 + TCP, como el servidor
+cliente.connect(("10.108.255.0", 4444))                        # IP y puerto del servidor
+```
+
+- `connect()` lanza el *three-way handshake* (`SYN` → `SYN-ACK` → `ACK`) y **bloquea** hasta que termina. Si nadie escucha en ese puerto, el servidor responde `[R]` y Python lanza `ConnectionRefusedError`.
+- Aquí no se puede poner `""` como en el `bind()` del servidor: `""` significa «todas mis IP», que sirve para escuchar, pero para llamar hay que dar una dirección concreta.
+- El cliente **no elige su puerto**: el SO le asigna uno **efímero** (los 48203 o 54169 que veía el servidor en `addr[1]`). Por eso el cliente no necesita `bind()`.
+
+### Ejemplo 5: IP y puerto por parámetros y enviar un mensaje (`servidorClienteParametros.py`)
+
+```python
+import socket, sys
+
+cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+cliente.connect((sys.argv[1], int(sys.argv[2])))   # python3 servidorClienteParametros.py 127.0.0.1 4444
+
+a = input("Qué enviamos?")
+cliente.sendall(a.encode("utf-8"))                 # texto -> bytes
+
+respuesta = cliente.recv(1024)                     # espera la respuesta del servidor
+print(respuesta.decode("utf-8"))                   # «Mensaje recibido» con el servidor del ejemplo 3
+cliente.close()
+```
+
+Diferencia con el ejemplo 4: la IP y el puerto **ya no están escritos en el código**, se pasan al ejecutarlo. Así el mismo programa sirve para conectar con el servidor de cualquier compañero (o con `127.0.0.1` para probar en local) sin editarlo.
+
+| Expresión | Qué es |
+|---|---|
+| `sys.argv` | Lista con los argumentos de la línea de órdenes, todos como `str` |
+| `sys.argv[0]` | El nombre del programa (`servidorClienteParametros.py`) |
+| `sys.argv[1]` | Primer argumento: la IP |
+| `int(sys.argv[2])` | Segundo argumento: el puerto, pasado a entero (`connect()` no acepta `"4444"` como texto) |
+
+Si se lanza sin argumentos salta `IndexError: list index out of range`.
+
+> ✏️ **Corrección (código del repo):** en `servidorClienteParametros.py` pone `cliente.rec(1024)`: el método es **`recv`**. Tal como está, después de enviar el mensaje salta `AttributeError: 'socket' object has no attribute 'rec'`.
+
+> ✏️ **Corrección:** el comentario de `close()` dice que envía el «sinq y ack». El `SYN` solo se usa para **abrir** la conexión; al cerrar se envía **`FIN`** (en `tcpdump`, `[F.]`) y el otro lado lo confirma con `ACK`. Es el SO quien lo hace, el programa solo llama a `close()`.
+
+> ➕ **Ampliación:** para probar los dos programas en el mismo equipo, se lanza primero el servidor del ejemplo 3 en una terminal y después, en otra, `python3 servidorClienteParametros.py 127.0.0.1 4444`. ⏳ Pendiente pegar aquí la salida real de las dos terminales.
+
+---
+
 ## Resumen rápido
 
 - **Cliente-servidor:** el servidor escucha en un puerto conocido y el cliente **inicia** la comunicación.
@@ -373,3 +433,4 @@ while True:
 - `recv(1024)` (bloqueante, devuelve `bytes`) + `decode("utf-8")`; `sendall(texto.encode("utf-8"))`; `close()` libera al cliente. UTF-8: 1 octeto en ASCII, 2-4 en el resto.
 - `SO_REUSEADDR` antes de `bind()` evita «Address already in use» al relanzar.
 - Con un solo hilo se atiende **un cliente cada vez**; la solución es un hilo por cliente tras cada `accept()` (UT4).
+- **Cliente:** `socket()` → `connect((ip, puerto))` (sin `bind()` ni `listen()`; el SO le da un puerto efímero) → `sendall()` → `recv()` → `close()` (el SO envía `FIN`). Con `sys.argv` la IP y el puerto se pasan al ejecutarlo.
