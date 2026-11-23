@@ -1,6 +1,6 @@
 # UT2 · Comunicación en red: sockets
 
-Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11, el 09/11, el 10/11 y el 17/11/2026.
+Apuntes de Programación de Servicios y Procesos (2º DAM 2026-2027), a partir de las notas de clase del 26/10, el 05/11, el 09/11, el 10/11, el 17/11 y el 23/11/2026.
 
 > 📚 Libro de referencia: *Programación de Servicios y Procesos en Python*. Cuando el profesor suba el temario de la UT2 al Campus, se completan estos apuntes con él.
 
@@ -419,6 +419,98 @@ Si se lanza sin argumentos salta `IndexError: list index out of range`.
 
 ---
 
+## 12. Sockets UDP: un chat de clase (23/11)
+
+Con UDP (apartado 2) **no hay conexión**: no hay `listen()`, ni `accept()`, ni socket de conexión por cliente. El servidor tiene **un solo socket** y por él le llegan los datagramas de todos los clientes; cada uno trae la dirección de quien lo envió, y el servidor la usa para contestar.
+
+| TCP (apartados 7-11) | UDP |
+|---|---|
+| `SOCK_STREAM` | `SOCK_DGRAM` |
+| Servidor: `bind()` → `listen()` → `accept()` | Servidor: solo `bind()` |
+| Un socket de conexión por cliente | Un único socket para todos |
+| `recv(1024)` → `bytes` | `recvfrom(1024)` → `(bytes, addr)`: los datos **y** quién los manda |
+| `sendall(datos)` (el destino ya es fijo) | `sendto(datos, addr)`: hay que decir a quién en cada envío |
+| Atender a varios a la vez necesita hilos (apartado 10) | Un bucle atiende a todos, datagrama a datagrama |
+
+### Ejemplo 6: el cliente UDP (`clienteUDP.py`)
+
+```python
+import socket, sys
+
+ip_server = sys.argv[1]           # la IP, como texto (str), desde la línea de órdenes
+port_server = int(sys.argv[2])    # el puerto llega como texto: se pasa a int
+
+cliente = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)   # UDP
+
+servidor = (ip_server, port_server)   # tupla: como una lista, pero no se puede modificar
+cliente.connect(servidor)             # en UDP no abre nada: solo fija el destino por defecto
+
+while True:
+    mensaje = input("Mensaje para enviar: ")
+    cliente.sendto(mensaje.encode("utf-8"), servidor)
+    respuesta, addr = cliente.recvfrom(1024)   # se bloquea hasta que llega un datagrama
+    print(respuesta.decode("utf-8"))
+```
+
+Respuestas a las preguntas de los comentarios del programa:
+
+- **¿Qué ocurre?** El cliente pide un mensaje por teclado, lo manda como un datagrama al servidor, espera **un** datagrama de vuelta, lo muestra y repite para siempre (se sale con `Ctrl+C`).
+- **¿De dónde recibe la IP y el puerto?** De la línea de órdenes, igual que en el ejemplo 5: `python3 clienteUDP.py 127.0.0.1 4444`. `sys.argv[1]` es la IP y `sys.argv[2]` el puerto, **los dos como `str`**.
+
+> ✏️ **Corrección (comentario del repo):** el comentario de `sys.argv[1]` dice «recibe el puerto como int por defecto». Ahí llega la **IP**, y todo lo que hay en `sys.argv` es `str`; por eso solo el puerto necesita `int()`.
+
+> ➕ **Ampliación:** en UDP, `connect()` **no envía ningún paquete** (no hay *handshake*). Solo deja apuntado el destino, así que bastaría con `send()`/`recv()`, y además el socket descarta datagramas que lleguen de otra dirección. Usar a la vez `connect()` y `sendto()` con la misma dirección funciona en Linux, pero en otros sistemas (macOS) `sendto()` sobre un socket conectado da error: mejor una cosa u otra.
+
+> ➕ **Ampliación:** el cliente se queda bloqueado en `recvfrom()` hasta que le llega algo. En el chat (ejemplo 8) esto se nota: los mensajes de los demás solo aparecen **después** de enviar uno propio. Para leer y escribir a la vez haría falta un hilo para `input()` y otro para `recvfrom()` (UT1).
+
+### Ejemplo 7: servidor eco, responde a cada cliente (`programaQueRecibeYDevuelveLaInfoASuRespectivoCliente23-11-2026.py`)
+
+```python
+import socket
+
+servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+servidor.bind(("", 4444))      # sin listen() ni accept()
+clientes = {}                  # diccionario vacío: clave = addr (ip, puerto)
+
+while True:
+    datos, addr = servidor.recvfrom(1024)   # espera un datagrama de quien sea
+    if addr in clientes:
+        print("Clientes existentes")        # esa (ip, puerto) ya había escrito antes
+    else:
+        print("Cliente nuevo")
+        clientes[addr] = datos              # se apunta la dirección
+    print(f"{addr}: {datos.decode('utf-8')}")
+    servidor.sendto(f"Echo: {datos.decode('utf-8')}".encode("utf-8"), addr)   # contesta solo al que escribió
+```
+
+`addr` es una tupla `(ip, puerto)`; como las tuplas no se pueden modificar, sirven como **clave de un diccionario**. Un cliente es «el mismo» mientras no cambie su puerto efímero: si se cierra `clienteUDP.py` y se vuelve a lanzar, el servidor lo verá como cliente nuevo.
+
+### Ejemplo 8: chat, reenvía el mensaje a los demás (`programaQueRecibeYDevuelveLaInfoATodosLosClientes23-11-2026 copy.py`)
+
+Mismo servidor, pero en vez del eco recorre el diccionario y reenvía el mensaje a **todos los clientes conocidos menos al que lo ha enviado**:
+
+```python
+    for cli in clientes:                 # recorre las claves: las (ip, puerto) conocidas
+        if cli != addr:                  # salta al que ha mandado el mensaje
+            servidor.sendto(f"{addr}: {datos.decode('utf-8')}".encode("utf-8"), cli)
+```
+
+**¿Qué hace el `sendto`?** Manda a cada cliente `cli` un datagrama con el texto `"(ip, puerto): mensaje"`, para que sepa quién lo ha escrito. Es el «chat de clase por terminal»: todos lanzan `clienteUDP.py` contra la IP del servidor y ven lo que escriben los demás.
+
+### Ejemplo 9: chat que también devuelve el mensaje al emisor (`programaQueRecibeYDevuelveLaInfoATodosLosClientesMenosAMiPropiaMaquina23-11-2026.py`)
+
+Igual que el 8 pero **sin el `if`**: el mensaje se reenvía a **todos**, también al que lo ha escrito.
+
+> ✏️ **Corrección (nombres de los archivos):** los nombres están cruzados. El que se llama «…MenosAMiPropiaMaquina…» es el que manda a todos **incluido** el emisor (no tiene `if cli != addr`), y el que acaba en « copy» es el que **excluye** al emisor. Conviene renombrarlos (y quitar el espacio de « copy», que obliga a poner comillas al ejecutarlo).
+
+> ➕ **Ampliación:** con el ejemplo 8, el cliente que escribe se queda esperando en `recvfrom()` una respuesta que no le llega (el servidor no le contesta a él) hasta que otro escriba. Con el 9 recibe su propio mensaje y puede seguir escribiendo: por eso en clase el 9 resulta más cómodo con este cliente.
+
+> ✏️ **Corrección (comentario del repo):** dice que «se borran los mensajes, solo quedando 1 por cliente». En realidad el servidor **no guarda el historial**: el diccionario solo se usa para saber a quién reenviar. Además, `clientes[addr] = datos` solo se ejecuta la primera vez (en el `else`), así que lo que queda guardado es el **primer** mensaje de cada cliente (el «hola»), no el último. Para la lista de clientes valdría un `set` (`clientes.add(addr)`).
+
+> ➕ **Ampliación:** UDP no confirma nada: si un datagrama se pierde nadie lo reenvía, y el servidor no se entera de que un cliente se ha ido (sigue en el diccionario). Para probarlo en local: el servidor en una terminal y `python3 clienteUDP.py 127.0.0.1 4444` en dos o tres más. Para ver el puerto: `ss -puanl` (la `u` es UDP; en UDP no sale `LISTEN`, sino `UNCONN`). ⏳ Pendiente pegar aquí la salida real.
+
+---
+
 ## Resumen rápido
 
 - **Cliente-servidor:** el servidor escucha en un puerto conocido y el cliente **inicia** la comunicación.
@@ -434,3 +526,4 @@ Si se lanza sin argumentos salta `IndexError: list index out of range`.
 - `SO_REUSEADDR` antes de `bind()` evita «Address already in use» al relanzar.
 - Con un solo hilo se atiende **un cliente cada vez**; la solución es un hilo por cliente tras cada `accept()` (UT4).
 - **Cliente:** `socket()` → `connect((ip, puerto))` (sin `bind()` ni `listen()`; el SO le da un puerto efímero) → `sendall()` → `recv()` → `close()` (el SO envía `FIN`). Con `sys.argv` la IP y el puerto se pasan al ejecutarlo.
+- **UDP:** `SOCK_DGRAM`, el servidor solo hace `bind()` y usa **un socket para todos**; `recvfrom(1024)` → `(datos, addr)` y `sendto(datos, addr)`. Guardando las `addr` en un diccionario se hace un eco o un chat que reenvía a todos los clientes conocidos. `connect()` en UDP no envía nada, solo fija el destino.
