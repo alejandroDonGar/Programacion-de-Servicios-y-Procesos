@@ -443,7 +443,7 @@ port_server = int(sys.argv[2])    # el puerto llega como texto: se pasa a int
 cliente = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)   # UDP
 
 servidor = (ip_server, port_server)   # tupla: como una lista, pero no se puede modificar
-cliente.connect(servidor)             # en UDP no abre nada: solo fija el destino por defecto
+## cliente.connect(servidor)          # comentado el 24/11: con sendto() no hace falta
 
 while True:
     mensaje = input("Mensaje para enviar: ")
@@ -459,7 +459,9 @@ Respuestas a las preguntas de los comentarios del programa:
 
 > ✏️ **Corrección (comentario del repo):** el comentario de `sys.argv[1]` dice «recibe el puerto como int por defecto». Ahí llega la **IP**, y todo lo que hay en `sys.argv` es `str`; por eso solo el puerto necesita `int()`.
 
-> ➕ **Ampliación:** en UDP, `connect()` **no envía ningún paquete** (no hay *handshake*). Solo deja apuntado el destino, así que bastaría con `send()`/`recv()`, y además el socket descarta datagramas que lleguen de otra dirección. Usar a la vez `connect()` y `sendto()` con la misma dirección funciona en Linux, pero en otros sistemas (macOS) `sendto()` sobre un socket conectado da error: mejor una cosa u otra.
+- **¿Por qué no hace falta `connect()`? (24/11)** Porque en UDP no hay conexión que abrir: cada `sendto(datos, servidor)` ya lleva el destino, y el SO asigna al socket un puerto efímero en el primer envío. Por eso en clase se comentó esa línea y el cliente funciona igual.
+
+> ➕ **Ampliación:** en UDP, `connect()` **no envía ningún paquete** (no hay *handshake*). Solo deja apuntado el destino, así que bastaría con `send()`/`recv()`, y además el socket descarta datagramas que lleguen de otra dirección. Usar a la vez `connect()` y `sendto()` con la misma dirección funciona en Linux, pero en otros sistemas (macOS) `sendto()` sobre un socket conectado da error: mejor una cosa u otra (de ahí que quitarlo sea lo más limpio).
 
 > ➕ **Ampliación:** el cliente se queda bloqueado en `recvfrom()` hasta que le llega algo. En el chat (ejemplo 8) esto se nota: los mensajes de los demás solo aparecen **después** de enviar uno propio. Para leer y escribir a la vez haría falta un hilo para `input()` y otro para `recvfrom()` (UT1).
 
@@ -511,6 +513,66 @@ Igual que el 8 pero **sin el `if`**: el mensaje se reenvía a **todos**, tambié
 
 ---
 
+## 13. El tamaño de un datagrama y recibir un archivo por UDP (24/11)
+
+### Lo que no cabe en el `recvfrom()` se pierde
+
+En TCP los datos son un **flujo**: si llegan 1050 octetos y haces `recv(1024)`, los 26 que faltan se quedan esperando y salen en el siguiente `recv()`. En UDP no: cada `sendto()` es **un datagrama entero**, y `recvfrom(n)` entrega **un datagrama por llamada**. Si el datagrama trae 1050 octetos y pides 1024, recibes los 1024 primeros y **los otros 26 se descartan** (en Linux, sin aviso).
+
+| | TCP `recv(1024)` | UDP `recvfrom(1024)` |
+|---|---|---|
+| Llegan 1050 octetos | Devuelve 1024; los 26 restantes salen en el siguiente `recv()` | Devuelve 1024 del datagrama; **los 26 restantes se pierden** |
+| Unidad | Flujo de octetos (sin fronteras) | Datagrama (cada envío llega entero o no llega) |
+
+La solución es pedir siempre el máximo que puede tener un datagrama: **`recvfrom(65536)`**. Pedir de más no cuesta nada: solo es el tamaño del búfer; si llegan 20 octetos, devuelve 20.
+
+### ¿De dónde sale 65536?
+
+La cabecera UDP tiene un campo **«longitud» de 16 bits**, y con 16 bits el número más grande es 2¹⁶ − 1 = **65 535** octetos (cabecera incluida). Restando los 8 octetos de la cabecera UDP quedan 65 527 de datos, y sobre IPv4 (cuyo paquete también mide como mucho 65 535, con 20 de cabecera IP) el máximo real de datos es **65 507** octetos.
+
+> ✏️ **Corrección (notas de clase):** el máximo **no** es 65 536, sino 65 535 de datagrama completo (65 507 de datos en IPv4). Se pone `recvfrom(65536)` porque es la potencia de 2 redonda que **cubre** cualquier datagrama posible, no porque se puedan enviar 65 536.
+
+> ➕ **Ampliación:** que quepa no significa que convenga. Un datagrama mayor que la MTU de la red (normalmente 1500 octetos en Ethernet) se trocea en fragmentos IP, y si se pierde uno se pierde el datagrama entero. Por eso, para mandar un archivo se suele enviar en trozos pequeños (p. ej. de 1024 o 1400 octetos), un `sendto()` por trozo.
+
+### Ejemplo 10: servidor que guarda en un archivo lo que recibe (`archivoServerUDP.py`, actividad)
+
+```python
+import socket
+
+servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+servidor.bind(("", 4444))      # estas dos líneas van siempre: crear el socket y decir IP y puerto
+
+archivo = open("fichero", "wb")   # "wb": escribir en binario (llegan bytes, no texto)
+
+while True:
+    datos, addr = servidor.recvfrom(65536)   # bloqueante; 65536 para no perder nada del datagrama
+    archivo.write(datos)
+```
+
+> ✏️ **Corrección (programa del repo):** pone `servidor.resvfrom(65536)`; el método es **`recvfrom`** (con `resvfrom` da `AttributeError` al llegar el primer datagrama).
+
+**La pregunta de la actividad: ¿cómo sabe el servidor que el archivo ha terminado?** UDP no tiene un «fin de conexión» como el `FIN` de TCP: no hay conexión. Hay que **acordarlo entre cliente y servidor** (un protocolo propio). Dos formas sencillas:
+
+1. **Marca de fin:** el cliente, al acabar, envía un datagrama especial, por ejemplo uno **vacío** (`sendto(b"", servidor)`). El servidor sale del bucle cuando lo recibe:
+
+    ```python
+    while True:
+        datos, addr = servidor.recvfrom(65536)
+        if not datos:              # datagrama vacío = el cliente ha terminado
+            break
+        archivo.write(datos)
+
+    archivo.close()                # sin close() puede quedar parte de los datos sin escribir en el disco
+    servidor.close()
+    print("Archivo escrito")
+    ```
+
+2. **Tiempo de espera:** `servidor.settimeout(5)` hace que `recvfrom()` lance `socket.timeout` si en 5 segundos no llega nada; se captura con `try/except` y se cierra el archivo. Sirve como red de seguridad si se pierde la marca de fin.
+
+> ➕ **Ampliación:** usar `with open("fichero", "wb") as archivo:` cierra el archivo solo al salir del bloque, aunque haya una excepción. Y como UDP no confirma ni ordena, el archivo puede llegar **incompleto o desordenado** sin que nadie lo note: para archivos lo normal es TCP (o numerar los trozos y confirmar, que es reinventar TCP). ⏳ Pendiente: el cliente que envía el archivo y la salida real de la prueba.
+
+---
+
 ## Resumen rápido
 
 - **Cliente-servidor:** el servidor escucha en un puerto conocido y el cliente **inicia** la comunicación.
@@ -526,18 +588,5 @@ Igual que el 8 pero **sin el `if`**: el mensaje se reenvía a **todos**, tambié
 - `SO_REUSEADDR` antes de `bind()` evita «Address already in use» al relanzar.
 - Con un solo hilo se atiende **un cliente cada vez**; la solución es un hilo por cliente tras cada `accept()` (UT4).
 - **Cliente:** `socket()` → `connect((ip, puerto))` (sin `bind()` ni `listen()`; el SO le da un puerto efímero) → `sendall()` → `recv()` → `close()` (el SO envía `FIN`). Con `sys.argv` la IP y el puerto se pasan al ejecutarlo.
-- **UDP:** `SOCK_DGRAM`, el servidor solo hace `bind()` y usa **un socket para todos**; `recvfrom(1024)` → `(datos, addr)` y `sendto(datos, addr)`. Guardando las `addr` en un diccionario se hace un eco o un chat que reenvía a todos los clientes conocidos. `connect()` en UDP no envía nada, solo fija el destino.
-
-
------
-24.11.2026
-
-a udp si le dices recvfrom(1024) y le llegan 1050, los que sobran se pierden
-
-llegan todos en un solo datagrama pero solo se leen 1024. 
-
-hay que buscar una manera de leer todos los que llegan de una. 
-
-como maximo se pueden enviar 65536 en un datagrama ¿De donde sale este numero?
-
-Por eso, lo idea es poner 'recvfrom(65536)'
+- **UDP:** `SOCK_DGRAM`, el servidor solo hace `bind()` y usa **un socket para todos**; `recvfrom(1024)` → `(datos, addr)` y `sendto(datos, addr)`. Guardando las `addr` en un diccionario se hace un eco o un chat que reenvía a todos los clientes conocidos. `connect()` en UDP no envía nada, solo fija el destino (con `sendto()` no hace falta).
+- **Tamaño UDP:** `recvfrom(n)` lee **un datagrama** y descarta lo que no cabe en `n` → usar `recvfrom(65536)` (máximo real: 65 535 de datagrama, 65 507 de datos en IPv4, por el campo de longitud de 16 bits). Para saber cuándo acaba un archivo hay que acordar una marca de fin (datagrama vacío) o usar `settimeout()`.
