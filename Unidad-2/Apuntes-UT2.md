@@ -527,3 +527,17 @@ Igual que el 8 pero **sin el `if`**: el mensaje se reenvía a **todos**, tambié
 - Con un solo hilo se atiende **un cliente cada vez**; la solución es un hilo por cliente tras cada `accept()` (UT4).
 - **Cliente:** `socket()` → `connect((ip, puerto))` (sin `bind()` ni `listen()`; el SO le da un puerto efímero) → `sendall()` → `recv()` → `close()` (el SO envía `FIN`). Con `sys.argv` la IP y el puerto se pasan al ejecutarlo.
 - **UDP:** `SOCK_DGRAM`, el servidor solo hace `bind()` y usa **un socket para todos**; `recvfrom(1024)` → `(datos, addr)` y `sendto(datos, addr)`. Guardando las `addr` en un diccionario se hace un eco o un chat que reenvía a todos los clientes conocidos. `connect()` en UDP no envía nada, solo fija el destino.
+
+
+-----
+24.11.2026
+
+a udp si le dices recvfrom(1024) y le llegan 1050, los que sobran se pierden
+
+llegan todos en un solo datagrama pero solo se leen 1024. 
+
+hay que buscar una manera de leer todos los que llegan de una. 
+
+como maximo se pueden enviar 65536 en un datagrama ¿De donde sale este numero?
+
+Por eso, lo idea es poner 'recvfrom(65536)'

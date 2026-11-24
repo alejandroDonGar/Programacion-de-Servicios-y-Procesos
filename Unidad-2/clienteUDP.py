@@ -8,7 +8,7 @@ port_server = int(sys.argv[2]) # Recibe el piuerto como string y lo trasformamos
 cliente = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
 
 servidor = (ip_server,port_server) # Tupla = lista no modificable
-cliente.connect(servidor)
+## cliente.connect(servidor) -> No hace falta cliente connect.¿Por qué?
 
 while True:
     mensaje=input("Mensaje para enviar: ")
